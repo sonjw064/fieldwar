@@ -4,6 +4,9 @@
   "description": "오행 속성 기반 실시간 마법사 대전 카드게임",
   "main": "server/index.js",
   "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "start": "node server/index.js",
     "dev": "nodemon server/index.js"
