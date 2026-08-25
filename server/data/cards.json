@@ -1,0 +1,85 @@
+[
+  {
+    "id": "atk_fire_1",
+    "name": "화염구",
+    "type": "attack",
+    "element": "화",
+    "cost": 3,
+    "attackPower": 20,
+    "defensePower": 0,
+    "description": "불의 정령이 담긴 화염구를 던진다."
+  },
+  {
+    "id": "atk_water_1",
+    "name": "해일",
+    "type": "attack",
+    "element": "수",
+    "cost": 2,
+    "attackPower": 15,
+    "defensePower": 0,
+    "description": "거대한 물결로 상대를 덮친다."
+  },
+  {
+    "id": "atk_wood_1",
+    "name": "가시덩굴",
+    "type": "attack",
+    "element": "목",
+    "cost": 1,
+    "attackPower": 10,
+    "defensePower": 0,
+    "description": "날카로운 가시덩굴로 상대를 찌른다."
+  },
+  {
+    "id": "def_earth_1",
+    "name": "돌벽",
+    "type": "defense",
+    "element": "토",
+    "cost": 2,
+    "attackPower": 0,
+    "defensePower": 15,
+    "description": "단단한 돌벽을 세워 공격을 막는다."
+  },
+  {
+    "id": "def_metal_1",
+    "name": "쇠사슬 방패",
+    "type": "defense",
+    "element": "금",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 8,
+    "description": "쇠사슬로 만든 방패로 몸을 감싼다."
+  },
+  {
+    "id": "def_water_1",
+    "name": "물의 장막",
+    "type": "defense",
+    "element": "수",
+    "cost": 2,
+    "attackPower": 0,
+    "defensePower": 15,
+    "description": "물의 장막을 펼쳐 공격을 흡수한다."
+  },
+  {
+    "id": "terrain_lava_1",
+    "name": "용암지대",
+    "type": "terrain",
+    "element": "화",
+    "cost": 0,
+    "attackPower": 0,
+    "defensePower": 0,
+    "synergyBonus": 5,
+    "description": "필드에 용암지대를 깐다. 다른 지형 카드가 나오기 전까지 유지되며, 화생토(火生土)로 토(土) 속성 카드의 위력을 강화한다."
+  },
+  {
+    "id": "effect_lightning_1",
+    "name": "전류",
+    "type": "effect",
+    "element": "금",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 0,
+    "tickDamage": 5,
+    "durationTurns": 3,
+    "description": "3턴 동안 매 턴이 넘어갈 때마다 생존한 전원에게 5의 피해를 준다. 다른 효과 카드와 중첩 가능."
+  }
+]

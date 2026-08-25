@@ -1,0 +1,811 @@
+body {
+  font-family: -apple-system, "Malgun Gothic", sans-serif;
+  background: #1b1b2f;
+  color: #f0f0f5;
+  display: flex;
+  justify-content: center;
+  padding: 60px 16px 24px;
+  box-sizing: border-box;
+  transition: background 0.8s ease; /* 지형 카드로 배경 테마가 바뀔 때 순간이동 대신 부드럽게 전환 */
+}
+
+#app {
+  width: 100%;
+  max-width: 380px;
+  text-align: center;
+}
+
+/* ---- 반응형: 화면이 좁으면(모바일 등) 위쪽 여백을 줄여서 공간을 더 확보 ---- */
+@media (max-width: 480px) {
+  body {
+    padding-top: 24px;
+  }
+}
+
+h1 {
+  margin-bottom: 24px;
+}
+
+input {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  border-radius: 6px;
+  border: none;
+  box-sizing: border-box;
+}
+
+/* 브라우저 기본 스타일은 <button>/<input>이 부모의 font-size를 물려받지 않게 끊어버립니다.
+   게임 보드의 em 기반 반응형 크기 조정이 버튼(카드)에도 적용되려면 이 상속을 다시 살려줘야 합니다. */
+button,
+input {
+  font: inherit;
+}
+
+button {
+  width: 100%;
+  padding: 10px;
+  margin-top: 6px;
+  border-radius: 6px;
+  border: none;
+  background: #6c5ce7;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #5b4bd1;
+}
+
+.join-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.join-row input {
+  margin-bottom: 0;
+}
+
+.hidden {
+  display: none;
+}
+
+.error {
+  color: #ff7675;
+  min-height: 20px;
+}
+
+#playerList {
+  list-style: none;
+  padding: 0;
+  text-align: left;
+}
+
+#playerList li {
+  background: #2d2d4d;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+}
+
+.turn-label {
+  font-size: 1.1em;
+  font-weight: bold;
+  margin-bottom: 0;
+  padding: 0.9em;
+  background: #2d2d4d;
+  border-radius: 0.5em;
+}
+
+/* 턴이 바뀔 때 잠깐 밝아졌다 원래대로 돌아오는 애니메이션 (JS에서 클래스를 토글해서 재생시킴) */
+@keyframes turn-flash {
+  0% {
+    background: #6c5ce7;
+  }
+  100% {
+    background: #2d2d4d;
+  }
+}
+
+.turn-label.turn-flash {
+  animation: turn-flash 0.6s ease;
+}
+
+/* ====================================================================
+   게임 보드 레이아웃 (개발자 스케치 기준, 2026-08-26)
+   좌상단: 내 상태 / 우상단: 상대들 / 우하단: 턴+로그+종료버튼 / 하단: 내 손패(부채꼴)
+   #app(폭 380px 고정)의 제한을 안 받도록 별도 영역으로 둠
+   ==================================================================== */
+.game-board {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "my-status opp-status"
+    "spacer side-panel"
+    "hand hand";
+  gap: 1.2em;
+  width: 100%;
+  /* 좌상단/우상단 배치가 화면 끝까지 계속 벌어지도록 상한을 넉넉하게 줌.
+     주의: 이 값은 "배치가 얼마나 벌어지는지"만 결정하고, 카드/상태창 "크기"는
+     아래 font-size(em 기준값)가 따로 결정하므로 서로 영향을 주지 않음 */
+  max-width: min(98vw, 2400px);
+  min-height: clamp(680px, 82vh, 980px);
+  margin: 0 auto;
+  padding: 1.6em;
+  box-sizing: border-box;
+
+  /* ---- 반응형 스케일의 기준값 ----
+     이 font-size 하나가 커지거나 작아지면, 이 안에서 em 단위로 정의된 모든 요소
+     (상태 카드, 지형/필드 박스, 손패 카드, 부채 간격 등)가 전부 같은 비율로 함께 커지고 작아집니다.
+     예전에는 요소마다 clamp(...)를 따로 줘서 서로 다른 속도로 커지는 문제가 있었는데,
+     이제는 "기준 하나 + 나머지는 전부 em"으로 통일해서 항상 같은 비율을 유지합니다. */
+  font-size: clamp(13px, 1.1vw, 30px);
+}
+
+/* .hidden이 스타일시트에서 .game-board보다 먼저 정의돼있어서, 같은 우선순위면 나중에 나온
+   .game-board의 display:grid가 이겨버림. 클래스 2개짜리 선택자로 확실하게 숨김 (.modal.hidden과 동일한 이유) */
+.game-board.hidden {
+  display: none;
+}
+
+.my-status-area {
+  grid-area: my-status;
+  justify-self: start;
+}
+
+.opp-status-area {
+  grid-area: opp-status;
+  justify-self: end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.6em;
+}
+
+.side-panel-area {
+  grid-area: side-panel;
+  justify-self: end;
+  align-self: end;
+  width: 19em;
+  max-width: 100%;
+}
+
+/* 턴 종료 버튼은 로그와 붙어 보이지 않도록 위쪽 여백을 좀 더 줌 */
+.side-panel-area #endTurnBtn {
+  margin-top: 0.6em;
+  padding: 0.9em;
+  font-size: 1.05em;
+}
+
+.corner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+}
+
+/* 화면이 좁으면 좌/우 코너 구조 대신 위에서 아래로 순서대로 쌓음 */
+@media (max-width: 700px) {
+  .game-board {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "my-status"
+      "opp-status"
+      "side-panel"
+      "hand";
+  }
+
+  .my-status-area,
+  .opp-status-area,
+  .side-panel-area {
+    justify-self: center;
+    align-self: auto;
+    align-items: center;
+  }
+
+  .side-panel-area {
+    width: 100%;
+    max-width: 320px;
+  }
+}
+
+/* ---- 상태 카드 (내 HP/코스트, 상대 HP/코스트에 공용으로 씀) ----
+   아래 크기들은 전부 em 단위 -> .game-board의 font-size 하나에 비례해서 함께 커지고 작아짐 */
+.opp-name {
+  font-size: 0.85em;
+  color: #a0a0c0;
+  text-align: right;
+  margin-bottom: -0.15em;
+}
+
+.status-card {
+  background: #2d2d4d;
+  border: 2px solid transparent;
+  border-radius: 0.5em;
+  padding: 0.7em 1em;
+  width: 18em;
+  max-width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.status-hp-bar {
+  background: #1b1b2f;
+  border-radius: 0.3em;
+  height: 0.9em;
+  overflow: hidden;
+  margin-bottom: 0.3em;
+}
+
+.status-hp-fill {
+  background: #00b894;
+  height: 100%;
+  transition: width 0.4s ease; /* HP가 깎일 때 순간이동 대신 부드럽게 줄어들도록 */
+}
+
+.status-hp-text {
+  font-size: 0.8em;
+  margin-bottom: 0.4em;
+  text-align: center;
+}
+
+/* 코스트를 스케치처럼 동그란 점(pip)으로 표현: 공격은 빨강, 방어는 파랑 */
+.cost-pips {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6em;
+}
+
+.cost-group {
+  display: flex;
+  gap: 0.2em;
+}
+
+.pip {
+  width: 0.65em;
+  height: 0.65em;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  box-sizing: border-box;
+}
+
+.cost-group.cost-attack {
+  color: #ff7675;
+}
+
+.cost-group.cost-defense {
+  color: #74b9ff;
+}
+
+.pip.filled {
+  background: currentColor;
+}
+
+/* 지금 턴인 사람의 상태 카드는 은은하게 계속 깜빡이는 테두리로 시선을 끔 */
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(108, 92, 231, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 10px rgba(108, 92, 231, 0.9);
+  }
+}
+
+.status-card.current-turn {
+  border-color: #6c5ce7;
+  animation: pulse-glow 1.6s ease-in-out infinite;
+}
+
+.status-card.dead {
+  opacity: 0.4;
+  animation: none;
+}
+
+.status-card.targetable {
+  cursor: pointer;
+  border-color: #ff7675;
+}
+
+.status-card.targetable:hover {
+  background: #3d3d63;
+}
+
+/* 피해를 입었을 때 잠깐 흔들리며 붉게 물드는 효과 */
+@keyframes shake-flash {
+  0% {
+    transform: translateX(0);
+    background: #2d2d4d;
+  }
+  20% {
+    transform: translateX(-4px);
+    background: #4a1f1f;
+  }
+  40% {
+    transform: translateX(4px);
+  }
+  60% {
+    transform: translateX(-3px);
+  }
+  80% {
+    transform: translateX(2px);
+  }
+  100% {
+    transform: translateX(0);
+    background: #2d2d4d;
+  }
+}
+
+.status-card.damage-flash {
+  animation: shake-flash 0.4s ease;
+}
+
+/* 완전 방어에 성공했을 때 잠깐 초록빛으로 은은하게 빛나는 효과 */
+@keyframes block-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(0, 184, 148, 0);
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(0, 184, 148, 0.9);
+  }
+}
+
+.status-card.block-flash {
+  animation: block-glow 0.5s ease;
+}
+
+/* ---- 필드 상태 (지형/효과) 박스: 스케치의 "지형 카드"/"필드 카드" 자리 ----
+   지금 깔려있는 필드 상태를 카드처럼 보여주는 자리 (개발자와 상의해서 결정) */
+.field-slot-card {
+  width: 10em;
+  max-width: 100%;
+  min-height: 11em;
+  border-radius: 0.5em;
+  padding: 0.7em 0.8em;
+  font-size: 0.85em;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.3em;
+}
+
+.field-slot-card .field-slot-title {
+  font-weight: bold;
+  font-size: 1.1em;
+}
+
+.field-slot-card.empty {
+  background: rgba(255, 255, 255, 0.05);
+  color: #6b6b8a;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.terrain-slot:not(.empty) {
+  background: #e17055;
+  color: white;
+}
+
+.effects-slot:not(.empty) {
+  background: #6c5ce7;
+  color: white;
+}
+
+.effects-slot .effect-item {
+  border-top: 1px solid rgba(255, 255, 255, 0.25);
+  padding-top: 3px;
+  margin-top: 3px;
+}
+
+.effects-slot .effect-item:first-child {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+/* ---- 손패 카드 (개발자가 준 실물 카드 사진 기준, 2026-08-26) ----
+   세로형 카드: 상단 제목 바 / 가운데 큰 아이콘 / 하단 속성·수치 정보, 우상단에 코스트 배지.
+   크기는 전부 em -> .game-board의 font-size에 비례해서 함께 커지고 작아짐 */
+.card-btn {
+  width: 11em;
+  height: 15.5em;
+  padding: 0.5em;
+  border-radius: 0.6em;
+  border: 0.14em solid #1b1b2f;
+  background: #f4efe3; /* 종이 카드 같은 아이보리색 */
+  color: #1b1b2f;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  position: relative; /* 코스트 배지를 카드 모서리에 겹쳐 놓기 위한 기준점 */
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card-btn:hover:not(.disabled) {
+  transform: translateY(-3px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+}
+
+/* 우상단에 살짝 겹쳐 튀어나온 동그란 코스트 배지 */
+.card-cost-badge {
+  position: absolute;
+  top: -0.7em;
+  right: -0.5em;
+  width: 1.9em;
+  height: 1.9em;
+  border-radius: 50%;
+  background: #2d2d4d;
+  color: white;
+  border: 0.12em solid #1b1b2f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85em;
+  font-weight: bold;
+}
+
+.card-name {
+  font-size: 0.85em;
+  font-weight: bold;
+  text-align: center;
+  border: 1px solid #1b1b2f;
+  border-radius: 0.3em;
+  padding: 0.35em 0.2em;
+  background: white;
+}
+
+/* 가운데 큰 아이콘 영역. 카드 타입별로 은은한 색을 다르게 줘서 구분함 */
+.card-icon-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.8em;
+  border-radius: 0.4em;
+  border: 1px solid rgba(27, 27, 47, 0.25);
+}
+
+.card-attack .card-icon-area {
+  background: #ffd3d1;
+}
+
+.card-defense .card-icon-area {
+  background: #cfe8ff;
+}
+
+.card-terrain .card-icon-area {
+  background: #ffe3cf;
+}
+
+.card-effect .card-icon-area {
+  background: #e3d9ff;
+}
+
+.card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75em;
+  padding: 0 0.15em;
+}
+
+.card-footer .card-element {
+  color: #4a4a68;
+}
+
+.card-footer .card-stat {
+  font-weight: bold;
+  background: #1b1b2f;
+  color: white;
+  padding: 0.2em 0.5em;
+  border-radius: 0.4em;
+}
+
+@keyframes select-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 4px rgba(253, 203, 110, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(253, 203, 110, 1);
+  }
+}
+
+.card-btn.selected {
+  border-color: #fdcb6e;
+  animation: select-pulse 1.2s ease-in-out infinite;
+}
+
+/* 방어 요청을 받은 동안, 낼 수 있는 방어 카드를 파란빛으로 강조 (손패에서 바로 클릭해서 냄) */
+@keyframes defend-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 4px rgba(116, 185, 255, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(116, 185, 255, 1);
+  }
+}
+
+.card-btn.defendable {
+  border-color: #74b9ff;
+  animation: defend-pulse 1.2s ease-in-out infinite;
+}
+
+.card-btn.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 시전 연출(cast-card)에서는 카드 이름 표시를 원래의 단순한 텍스트 스타일로 되돌림
+   (그쪽은 카드 실물 모양이 아니라 확대된 안내 문구라서 흰 배경 제목바가 안 어울림) */
+.cast-card .card-name {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.card-desc {
+  font-size: 13px;
+  font-weight: normal;
+  opacity: 0.85;
+  margin-top: 4px;
+}
+
+/* ---- 손패 부채꼴 (하단 전체) ----
+   모든 카드를 화면 하단 중앙의 같은 기준점에 두고, 카드마다 두 개의 "숫자"만 다르게 줌:
+   --fan-offset (중앙=0, 왼쪽은 음수/오른쪽은 양수 - 몇 번째 자리인지)
+   --fan-lift    (중앙이 가장 큰 음수 = 가장 위로, 가장자리로 갈수록 0에 가까워짐)
+   실제 가로 간격/회전 각도/들리는 높이는 --card-x-step 등 em 기반 변수에 곱해서 계산하므로,
+   .game-board의 font-size가 커지면 간격도 같은 비율로 같이 커짐. 마우스를 올리면 그 방향 그대로 위로 더 들리면서 빛남 */
+.hand-fan-area {
+  grid-area: hand;
+  display: flex;
+  justify-content: center;
+}
+
+.hand-fan {
+  position: relative;
+  width: 100%;
+  max-width: min(94vw, 1300px);
+  height: 24em; /* 카드 높이(15.5em) + 기본 들어올림 + 호버 시 크게 튀어나오는 여유분 */
+  --card-x-step: 6.5em; /* 카드 한 칸당 가로 간격 (em -> 게임판 스케일과 함께 커짐) */
+  --card-y-step: 1.1em; /* 카드 한 칸당 들리는 높이 */
+  --card-angle-step: 8deg; /* 카드 한 칸당 회전 각도 (각도라서 화면 크기와 무관) */
+}
+
+.hand-fan .card-btn {
+  position: absolute;
+  left: 50%;
+  bottom: 1.7em; /* 화면 맨 아래에 딱 붙지 않도록 살짝 띄워서 배치 */
+  transform-origin: bottom center;
+  transform: translateX(calc(-50% + var(--fan-offset, 0) * var(--card-x-step)))
+    rotate(calc(var(--fan-offset, 0) * var(--card-angle-step)))
+    translateY(calc(var(--fan-lift, 0) * var(--card-y-step)));
+}
+
+/* 마우스를 올리면 부채 각도를 풀고(rotate 0) 훨씬 위로 크게 튀어나오게 해서
+   겹쳐 있던 다른 카드에 안 가리고 내용을 편하게 확인할 수 있게 함 */
+.hand-fan .card-btn:hover:not(.disabled) {
+  transform: translateX(calc(-50% + var(--fan-offset, 0) * var(--card-x-step))) rotate(0deg)
+    translateY(calc(var(--fan-lift, 0) * var(--card-y-step) - 4.5em)) scale(1.08);
+  box-shadow: 0 0 24px 8px rgba(253, 203, 110, 0.85);
+  z-index: 100 !important;
+}
+
+/* ---- 화면 중앙 오버레이 공용 (지형/효과 카드 미리보기 + 전투 연출이 같이 씀) ---- */
+.cast-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 900;
+  opacity: 1;
+  transition: opacity 0.35s ease;
+}
+
+/* 전투 연출(#combatOverlay)은 클릭해서 뭘 하는 화면이 아니라 "보여주기만" 하는 화면입니다.
+   그런데 화면 전체를 덮는 position:fixed 요소라서, pointer-events를 안 끄면 반투명 배경 뒤에
+   비쳐 보이는 손패 카드까지 클릭을 다 가로채버려서 방어 카드를 못 누르는 버그가 있었습니다.
+   #castOverlay(지형/효과 카드 미리보기)는 클릭으로 확정/취소해야 하니 그대로 둡니다. */
+#combatOverlay {
+  pointer-events: none;
+}
+
+.cast-overlay.hidden {
+  display: none;
+}
+
+/* 결과가 확정된 뒤 겹쳐있던 카드들이 다같이 옅어지면서 사라지는 중간 상태
+   (곧바로 .hidden을 붙이면 순간이동하듯 사라지므로, 페이드 아웃이 끝난 뒤에 JS가 .hidden을 붙임) */
+.cast-overlay.fading-out {
+  opacity: 0;
+}
+
+@keyframes cast-pop-in {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* ---- 지형/효과 카드 미리보기 (클릭해서 확정, 2026-08-27) ----
+   화면 중앙에 뜨지만, 시간이 지나도 자동으로 사라지지 않고
+   "카드를 클릭 = 사용 확정" / "바깥(배경)을 클릭 = 취소"로 사용자가 직접 결정할 때까지 기다림 */
+#castOverlay {
+  cursor: pointer; /* 배경(바깥) 아무 곳이나 클릭하면 취소된다는 걸 암시 */
+}
+
+/* 시전 연출에 뜨는 카드는 손패 카드(.card-btn)를 그대로 재사용해서 만듦 (완전히 같은 모양) */
+.cast-card-wrapper {
+  filter: drop-shadow(0 0 40px rgba(253, 203, 110, 0.6));
+  animation: cast-pop-in 0.25s ease forwards;
+}
+
+/* 클릭해서 확정할 수 있는 카드라는 걸 은은한 펄스로 강조 */
+@keyframes preview-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 10px rgba(253, 203, 110, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 26px rgba(253, 203, 110, 0.95);
+  }
+}
+
+.cast-card-wrapper .card-btn {
+  cursor: pointer;
+  animation: preview-pulse 1.2s ease-in-out infinite;
+}
+
+.preview-hint {
+  margin-top: 0.8em;
+  text-align: center;
+  font-size: 0.9em;
+  color: white;
+  opacity: 0.85;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* ---- 전투 연출: 공격 카드 + 방어 카드들이 겹쳐 쌓이는 곳 (2026-08-27) ----
+   서버 방송(game:attackAnnounced/game:defenseCardApplied)으로 채워지므로 전원에게 동일하게 보임.
+   방어가 끝날 때까지(game:combatResult) 안 사라지고, 카드가 하나씩 늘어날 때마다 위에 겹쳐 쌓임 */
+.cast-stack {
+  position: relative;
+  width: 12.1em; /* 손패 카드(11em)보다 10% 큼 */
+  height: 17.05em; /* 손패 카드(15.5em)보다 10% 큼 */
+}
+
+.cast-stack .card-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 12.1em;
+  height: 17.05em;
+  pointer-events: none; /* 순전히 보여주기 용도라 클릭/호버에 반응하지 않음 */
+  /* 뒤에 놓인 카드일수록(= --stack-index가 클수록) 더 돌아가고 더 옆으로 밀려서
+     "카드를 겹쳐서 슬쩍 덮어 막는" 느낌을 냄. 카드 자체는 CSS 애니메이션으로 한 번만 등장함 */
+  transform: translate(-50%, -50%) rotate(calc(var(--stack-index, 0) * 12deg))
+    translate(calc(var(--stack-index, 0) * 0.7em), calc(var(--stack-index, 0) * -0.5em));
+  animation: stack-drop-in 0.3s ease-out both;
+}
+
+@keyframes stack-drop-in {
+  0% {
+    transform: translate(-50%, -50%) rotate(calc(var(--stack-index, 0) * 12deg))
+      translate(calc(var(--stack-index, 0) * 0.7em), calc(var(--stack-index, 0) * -0.5em)) scale(1.5);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(-50%, -50%) rotate(calc(var(--stack-index, 0) * 12deg))
+      translate(calc(var(--stack-index, 0) * 0.7em), calc(var(--stack-index, 0) * -0.5em)) scale(1);
+    opacity: 1;
+  }
+}
+
+/* 상극/지형 보너스처럼 "추가로 붙은 효과"를 눈에 띄게 강조하는 글씨색 */
+.bonus-text {
+  color: #fdcb6e;
+  font-weight: bold;
+}
+
+/* ---- 전투 로그 ---- */
+.combat-log {
+  max-height: 8em;
+  overflow-y: auto;
+  background: rgba(20, 20, 32, 0.5);
+  border-radius: 0.4em;
+  padding: 0.5em 0.7em;
+  font-size: 0.8em;
+  text-align: left;
+}
+
+.combat-log p {
+  margin: 0.3em 0;
+}
+
+/* ---- 방어 요청 배너 (더 이상 화면을 가리는 팝업이 아님, 2026-08-26) ----
+   화면을 가리지 않는 얇은 안내 바. 실제 방어 카드 선택은 하단 손패에서 직접 함 */
+.defense-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #74b9ff;
+  color: #1b1b2f;
+  padding: 0.7em 1em;
+  font-size: 1em;
+  font-weight: bold;
+  z-index: 950; /* 시전 연출(900)보다 위, 연결 끊김 배너(1000)보다는 아래 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1em;
+  flex-wrap: wrap;
+  text-align: center;
+}
+
+.defense-banner.hidden {
+  display: none;
+}
+
+/* ---- 방어 카드 선택 확정("사용")/취소 버튼 (2026-08-27) ----
+   화면 양쪽 아래 구석에 고정. 방어 요청을 받은 동안(isDefending)에만 나타남 */
+.corner-action-btn {
+  position: fixed;
+  bottom: 1.5em;
+  width: auto;
+  padding: 0.9em 1.8em;
+  font-size: 1.05em;
+  z-index: 950; /* 방어 배너와 같은 층 - 손패보다는 위, 연결 끊김 배너보다는 아래 */
+}
+
+.confirm-defense-btn {
+  right: 1.5em;
+  background: #00b894;
+}
+
+.confirm-defense-btn:hover {
+  background: #00997a;
+}
+
+.cancel-defense-btn {
+  left: 1.5em;
+  background: #636e72;
+}
+
+.cancel-defense-btn:hover {
+  background: #535a5c;
+}
+
+/* ---- 연결 끊김 배너 ---- */
+.connection-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #d63031;
+  color: white;
+  text-align: center;
+  padding: 8px;
+  font-size: 13px;
+  font-weight: bold;
+  z-index: 1000;
+}
+
+.connection-banner.hidden {
+  display: none;
+}

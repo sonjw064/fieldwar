@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>필드워 (가칭)</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Socket.io 연결이 끊겼을 때만 화면 맨 위에 뜨는 배너 -->
+  <div id="connectionBanner" class="connection-banner hidden">🔌 서버와의 연결이 끊겼습니다. 재연결 시도 중...</div>
+
+  <div id="app">
+    <h1>필드워</h1>
+
+    <!-- 로그인 없이 닉네임만 입력하는 화면 -->
+    <section id="lobby">
+      <input id="nicknameInput" type="text" placeholder="닉네임 입력" maxlength="10" />
+
+      <div class="lobby-actions">
+        <button id="createRoomBtn">방 만들기</button>
+
+        <div class="join-row">
+          <input id="roomIdInput" type="text" placeholder="방 코드 (4자리)" maxlength="4" />
+          <button id="joinRoomBtn">입장하기</button>
+        </div>
+      </div>
+
+      <p id="errorMsg" class="error"></p>
+    </section>
+
+    <!-- 방에 들어오면 보이는 대기실 화면 -->
+    <section id="room" class="hidden">
+      <h2>방 코드: <span id="roomIdLabel"></span></h2>
+      <ul id="playerList"></ul>
+      <button id="startGameBtn" class="hidden">게임 시작</button>
+    </section>
+
+    <!-- 게임 종료 화면 -->
+    <section id="gameOver" class="hidden">
+      <h2>게임 종료</h2>
+      <p id="winnerLabel"></p>
+    </section>
+  </div>
+
+  <!--
+    게임 진행 화면 (개발자가 그림판으로 스케치해준 레이아웃 기준, 2026-08-26 반영):
+    - 좌상단: 내 HP/코스트 + 현재 필드 상태(지형/효과)
+    - 우상단: 상대방들의 HP/코스트 (여러 명이면 세로로 쌓임)
+    - 우하단: 턴 표시 / 전투 로그 / 턴 종료 버튼
+    - 하단 전체: 내 손패 (부채꼴로 펼쳐짐)
+    #app은 폭이 380px로 좁게 고정돼있어서(로비/대기실용), 게임 보드는 그 제한을 받지 않도록
+    #app 바깥에 형제 요소로 따로 둡니다.
+  -->
+  <section id="game" class="hidden game-board">
+    <div class="corner my-status-area">
+      <div id="myStatusCard" class="status-card"></div>
+      <div id="terrainSlot" class="field-slot-card terrain-slot"></div>
+      <div id="effectsSlot" class="field-slot-card effects-slot"></div>
+    </div>
+
+    <div class="corner opp-status-area" id="opponentsPanel"></div>
+
+    <div class="corner side-panel-area">
+      <p id="turnLabel" class="turn-label"></p>
+      <div id="combatLog" class="combat-log"></div>
+      <button id="endTurnBtn" class="hidden">턴 종료</button>
+    </div>
+
+    <!-- 내 손패. 공격 카드를 클릭해서 고른 뒤 상대 카드를 클릭하면 공격이 나감 -->
+    <div class="hand-fan-area">
+      <div id="handArea" class="hand-fan"></div>
+    </div>
+
+    <!--
+      공격을 받았을 때 뜨는 안내 배너 (화면을 가리는 팝업이 아님).
+      방어 카드는 아래 손패(부채꼴)에서 직접 클릭해서 "선택"만 하고(서버에는 아직 아무 것도 안 보냄),
+      화면 우하단의 "사용" 버튼을 눌러야 실제로 서버에 반영됩니다 - renderHand()가 isDefending
+      상태일 때 방어 카드만 선택 가능하게(defendable/selected) 바꿔줌.
+    -->
+    <div id="defenseBanner" class="defense-banner hidden">
+      <span id="defenseInfo"></span>
+    </div>
+  </section>
+
+  <!--
+    방어 카드 선택 확정/취소 버튼 (2026-08-27 추가).
+    "사용"은 지금까지 고른 카드들을 서버에 보내 확정하고(0장이면 방어 포기와 같음),
+    "취소"는 서버에 아무 것도 보내지 않고 지금까지의 선택만 로컬에서 되돌립니다.
+    방어 요청을 받았을 때만(isDefending) 보임.
+  -->
+  <button id="confirmDefenseBtn" class="corner-action-btn confirm-defense-btn hidden">사용</button>
+  <button id="cancelDefenseBtn" class="corner-action-btn cancel-defense-btn hidden">취소</button>
+
+  <!--
+    지형/효과 카드 미리보기 (클릭해서 확정, 나 혼자만 보는 로컬 UI).
+    #castCard 안에는 손패에 있는 카드와 완전히 동일한 모양(.card-btn)을 그대로 만들어 넣습니다.
+  -->
+  <div id="castOverlay" class="cast-overlay hidden">
+    <div id="castCard" class="cast-card-wrapper"></div>
+  </div>
+
+  <!--
+    전투 연출 (공격 카드 + 방어 카드들). 서버가 방 전체에 방송하는 이벤트로 채워지므로,
+    공격자/방어자뿐 아니라 게임에 참여한 모든 사람 화면에 똑같이 보입니다.
+    공격 카드는 방어가 끝날 때까지(game:combatResult) 사라지지 않고, 방어 카드를 낼 때마다
+    그 위에 겹쳐서 쌓입니다. 결과가 확정되면 전부 한꺼번에 사라집니다.
+  -->
+  <div id="combatOverlay" class="cast-overlay hidden">
+    <div id="combatStack" class="cast-stack"></div>
+  </div>
+
+  <!-- Socket.io 클라이언트 스크립트: 서버가 자동으로 이 경로에 파일을 만들어줍니다 -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
