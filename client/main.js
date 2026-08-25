@@ -150,7 +150,7 @@ function buildCardTitleText(card) {
     return `${card.name} · 방어력 ${card.defensePower} · ${card.element}속성 · 코스트 ${card.cost}`;
   }
   if (card.type === "terrain") {
-    return `${card.name} · ${card.element}속성 상생 보너스 +${card.synergyBonus} · 코스트 ${card.cost}`;
+    return `${card.name} · ${card.element}속성 및 상생 대상 속성 카드 위력 +${card.synergyBonus} · 코스트 ${card.cost}`;
   }
   return `${card.name} · ${card.durationTurns}턴 동안 매턴 ${card.tickDamage}의 피해 · 코스트 ${card.cost}`;
 }
@@ -531,7 +531,7 @@ function renderFieldStatus() {
     terrainSlot.className = "field-slot-card terrain-slot";
     terrainSlot.innerHTML = `
       <div class="field-slot-title">🗺️ ${latestTerrain.cardName}</div>
-      <div>${elementIcon(latestTerrain.element)}${latestTerrain.element} → ${elementIcon(
+      <div>${elementIcon(latestTerrain.element)}${latestTerrain.element} · ${elementIcon(
       latestTerrain.boostedElement
     )}${latestTerrain.boostedElement} 카드 +${latestTerrain.synergyBonus}</div>
     `;
@@ -794,7 +794,7 @@ socket.on(
 
     const line = document.createElement("p");
     if (fieldType === "terrain") {
-      line.innerHTML = `${safeNickname}님이 지형 카드 "${safeCardName}"을(를) 설치했습니다. <span class="bonus-text">(${element}속성 → ${boostedElement}속성 카드 +${synergyBonus})</span>`;
+      line.innerHTML = `${safeNickname}님이 지형 카드 "${safeCardName}"을(를) 설치했습니다. <span class="bonus-text">(${element}속성 · ${boostedElement}속성 카드 +${synergyBonus})</span>`;
     } else {
       line.innerHTML = `${safeNickname}님이 효과 카드 "${safeCardName}"을(를) 사용했습니다. <span class="bonus-text">(${durationTurns}턴 동안 매턴 ${tickDamage} 피해)</span>`;
     }

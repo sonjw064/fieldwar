@@ -1,85 +1,732 @@
 [
   {
-    "id": "atk_fire_1",
-    "name": "화염구",
-    "type": "attack",
-    "element": "화",
-    "cost": 3,
-    "attackPower": 20,
-    "defensePower": 0,
-    "description": "불의 정령이 담긴 화염구를 던진다."
-  },
-  {
-    "id": "atk_water_1",
-    "name": "해일",
-    "type": "attack",
-    "element": "수",
-    "cost": 2,
-    "attackPower": 15,
-    "defensePower": 0,
-    "description": "거대한 물결로 상대를 덮친다."
-  },
-  {
     "id": "atk_wood_1",
-    "name": "가시덩굴",
+    "name": "목검베기",
     "type": "attack",
     "element": "목",
     "cost": 1,
     "attackPower": 10,
     "defensePower": 0,
-    "description": "날카로운 가시덩굴로 상대를 찌른다."
+    "description": "순수하게 공격력 10의 피해를 입힌다."
+  },
+  {
+    "id": "atk_wood_2",
+    "name": "넝쿨묶기",
+    "type": "attack",
+    "element": "목",
+    "cost": 1,
+    "attackPower": 7,
+    "defensePower": 0,
+    "description": "상대는 다음 턴 방어 카드를 사용할 수 없다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_wood_3",
+    "name": "가시강타",
+    "type": "attack",
+    "element": "목",
+    "cost": 2,
+    "attackPower": 15,
+    "defensePower": 0,
+    "description": "순수하게 공격력 15의 피해를 입힌다."
+  },
+  {
+    "id": "atk_wood_4",
+    "name": "뿌리결박",
+    "type": "attack",
+    "element": "목",
+    "cost": 2,
+    "attackPower": 11,
+    "defensePower": 0,
+    "description": "상대는 1턴 동안 행동할 수 없다(기절) (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_wood_5",
+    "name": "대지속박",
+    "type": "attack",
+    "element": "목",
+    "cost": 3,
+    "attackPower": 16,
+    "defensePower": 0,
+    "description": "상대는 2턴 동안 행동할 수 없다(기절) (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_fire_1",
+    "name": "불꽃찌르기",
+    "type": "attack",
+    "element": "화",
+    "cost": 1,
+    "attackPower": 10,
+    "defensePower": 0,
+    "description": "순수하게 공격력 10의 피해를 입힌다."
+  },
+  {
+    "id": "atk_fire_2",
+    "name": "화염구",
+    "type": "attack",
+    "element": "화",
+    "cost": 1,
+    "attackPower": 8,
+    "defensePower": 0,
+    "description": "3턴 동안 매턴 화상 피해 2를 추가로 입힌다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_fire_3",
+    "name": "화염폭발",
+    "type": "attack",
+    "element": "화",
+    "cost": 2,
+    "attackPower": 15,
+    "defensePower": 0,
+    "description": "순수하게 공격력 15의 피해를 입힌다."
+  },
+  {
+    "id": "atk_fire_4",
+    "name": "작열의일격",
+    "type": "attack",
+    "element": "화",
+    "cost": 2,
+    "attackPower": 12,
+    "defensePower": 0,
+    "description": "방어력을 무시하고 고정 피해 5를 추가로 입힌다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_fire_5",
+    "name": "대화염",
+    "type": "attack",
+    "element": "화",
+    "cost": 3,
+    "attackPower": 20,
+    "defensePower": 0,
+    "description": "3턴 동안 매턴 화상 피해 4를 추가로 입힌다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_earth_1",
+    "name": "돌팔매",
+    "type": "attack",
+    "element": "토",
+    "cost": 1,
+    "attackPower": 10,
+    "defensePower": 0,
+    "description": "순수하게 공격력 10의 피해를 입힌다."
+  },
+  {
+    "id": "atk_earth_2",
+    "name": "흙먼지폭풍",
+    "type": "attack",
+    "element": "토",
+    "cost": 1,
+    "attackPower": 6,
+    "defensePower": 0,
+    "description": "상대 전원에게 피해를 입힌다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_earth_3",
+    "name": "암석낙하",
+    "type": "attack",
+    "element": "토",
+    "cost": 2,
+    "attackPower": 15,
+    "defensePower": 0,
+    "description": "순수하게 공격력 15의 피해를 입힌다."
+  },
+  {
+    "id": "atk_earth_4",
+    "name": "지진",
+    "type": "attack",
+    "element": "토",
+    "cost": 2,
+    "attackPower": 11,
+    "defensePower": 0,
+    "description": "상대 전원에게 피해를 입힌다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_earth_5",
+    "name": "맨틀폭발",
+    "type": "attack",
+    "element": "토",
+    "cost": 3,
+    "attackPower": 18,
+    "defensePower": 0,
+    "description": "상대 전원에게 강한 피해를 입히며 방어력을 일부 무시한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_metal_1",
+    "name": "검기",
+    "type": "attack",
+    "element": "금",
+    "cost": 1,
+    "attackPower": 10,
+    "defensePower": 0,
+    "description": "순수하게 공격력 10의 피해를 입힌다."
+  },
+  {
+    "id": "atk_metal_2",
+    "name": "예기강화",
+    "type": "attack",
+    "element": "금",
+    "cost": 1,
+    "attackPower": 7,
+    "defensePower": 0,
+    "description": "다음 턴 자신의 공격력이 5 증가한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_metal_3",
+    "name": "참격",
+    "type": "attack",
+    "element": "금",
+    "cost": 2,
+    "attackPower": 15,
+    "defensePower": 0,
+    "description": "순수하게 공격력 15의 피해를 입힌다."
+  },
+  {
+    "id": "atk_metal_4",
+    "name": "금강의기세",
+    "type": "attack",
+    "element": "금",
+    "cost": 2,
+    "attackPower": 11,
+    "defensePower": 0,
+    "description": "2턴 동안 자신의 공격력·방어력이 소폭 상승한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_metal_5",
+    "name": "검왕의일격",
+    "type": "attack",
+    "element": "금",
+    "cost": 3,
+    "attackPower": 18,
+    "defensePower": 0,
+    "description": "3턴 동안 자신의 공격력이 8 증가한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_water_1",
+    "name": "물채찍",
+    "type": "attack",
+    "element": "수",
+    "cost": 1,
+    "attackPower": 10,
+    "defensePower": 0,
+    "description": "순수하게 공격력 10의 피해를 입힌다."
+  },
+  {
+    "id": "atk_water_2",
+    "name": "흡수의물결",
+    "type": "attack",
+    "element": "수",
+    "cost": 1,
+    "attackPower": 7,
+    "defensePower": 0,
+    "description": "가한 피해의 50%만큼 자신의 HP를 회복한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_water_3",
+    "name": "파도가르기",
+    "type": "attack",
+    "element": "수",
+    "cost": 2,
+    "attackPower": 15,
+    "defensePower": 0,
+    "description": "순수하게 공격력 15의 피해를 입힌다."
+  },
+  {
+    "id": "atk_water_4",
+    "name": "치유의파동",
+    "type": "attack",
+    "element": "수",
+    "cost": 2,
+    "attackPower": 9,
+    "defensePower": 0,
+    "description": "자신의 HP를 6 회복한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "atk_water_5",
+    "name": "해일",
+    "type": "attack",
+    "element": "수",
+    "cost": 3,
+    "attackPower": 18,
+    "defensePower": 0,
+    "description": "자신의 HP를 10 회복한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+  },
+  {
+    "id": "def_wood_1",
+    "name": "목방패",
+    "type": "defense",
+    "element": "목",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 8,
+    "description": "순수하게 방어력 8로 공격을 막는다."
+  },
+  {
+    "id": "def_wood_2",
+    "name": "가시덤불",
+    "type": "defense",
+    "element": "목",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 5,
+    "description": "방어에 성공하면 상대는 다음 공격 카드를 사용할 수 없다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+  },
+  {
+    "id": "def_wood_3",
+    "name": "넝쿨방벽",
+    "type": "defense",
+    "element": "목",
+    "cost": 2,
+    "attackPower": 0,
+    "defensePower": 15,
+    "description": "순수하게 방어력 15로 공격을 막는다."
+  },
+  {
+    "id": "def_wood_4",
+    "name": "뿌리감옥",
+    "type": "defense",
+    "element": "목",
+    "cost": 2,
+    "attackPower": 0,
+    "defensePower": 11,
+    "description": "방어에 성공하면 상대는 1턴 동안 행동할 수 없다(기절) (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+  },
+  {
+    "id": "def_wood_5",
+    "name": "대삼림의방패",
+    "type": "defense",
+    "element": "목",
+    "cost": 3,
+    "attackPower": 0,
+    "defensePower": 16,
+    "description": "방어에 성공하면 상대는 2턴 동안 행동할 수 없다(기절) (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+  },
+  {
+    "id": "def_fire_1",
+    "name": "불방패",
+    "type": "defense",
+    "element": "화",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 8,
+    "description": "순수하게 방어력 8로 공격을 막는다."
+  },
+  {
+    "id": "def_fire_2",
+    "name": "화염반사",
+    "type": "defense",
+    "element": "화",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 6,
+    "description": "방어에 성공하면 상대에게 반격 피해 5를 입힌다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+  },
+  {
+    "id": "def_fire_3",
+    "name": "작열방벽",
+    "type": "defense",
+    "element": "화",
+    "cost": 2,
+    "attackPower": 0,
+    "defensePower": 15,
+    "description": "순수하게 방어력 15로 공격을 막는다."
+  },
+  {
+    "id": "def_fire_4",
+    "name": "불꽃되받기",
+    "type": "defense",
+    "element": "화",
+    "cost": 2,
+    "attackPower": 0,
+    "defensePower": 11,
+    "description": "방어에 성공하면 상대에게 반격 피해 8을 입힌다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+  },
+  {
+    "id": "def_fire_5",
+    "name": "화염의성벽",
+    "type": "defense",
+    "element": "화",
+    "cost": 3,
+    "attackPower": 0,
+    "defensePower": 16,
+    "description": "방어에 성공하면 상대에게 반격 피해 12를 입힌다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
   },
   {
     "id": "def_earth_1",
-    "name": "돌벽",
+    "name": "흙방패",
+    "type": "defense",
+    "element": "토",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 8,
+    "description": "순수하게 방어력 8로 공격을 막는다."
+  },
+  {
+    "id": "def_earth_2",
+    "name": "대지의보호막",
+    "type": "defense",
+    "element": "토",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 5,
+    "description": "방어에 성공하면 아군 전체가 1턴 동안 받는 피해가 소폭 감소한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+  },
+  {
+    "id": "def_earth_3",
+    "name": "암석방벽",
     "type": "defense",
     "element": "토",
     "cost": 2,
     "attackPower": 0,
     "defensePower": 15,
-    "description": "단단한 돌벽을 세워 공격을 막는다."
+    "description": "순수하게 방어력 15로 공격을 막는다."
+  },
+  {
+    "id": "def_earth_4",
+    "name": "지반강화",
+    "type": "defense",
+    "element": "토",
+    "cost": 2,
+    "attackPower": 0,
+    "defensePower": 11,
+    "description": "방어에 성공하면 아군 전체의 방어력이 1턴 동안 증가한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+  },
+  {
+    "id": "def_earth_5",
+    "name": "대지의성채",
+    "type": "defense",
+    "element": "토",
+    "cost": 3,
+    "attackPower": 0,
+    "defensePower": 16,
+    "description": "방어에 성공하면 아군 전체가 2턴 동안 받는 피해가 감소한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
   },
   {
     "id": "def_metal_1",
-    "name": "쇠사슬 방패",
+    "name": "금방패",
     "type": "defense",
     "element": "금",
     "cost": 1,
     "attackPower": 0,
     "defensePower": 8,
-    "description": "쇠사슬로 만든 방패로 몸을 감싼다."
+    "description": "순수하게 방어력 8로 공격을 막는다."
+  },
+  {
+    "id": "def_metal_2",
+    "name": "예기수련",
+    "type": "defense",
+    "element": "금",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 5,
+    "description": "방어에 성공하면 다음 턴 자신의 공격력이 5 증가한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+  },
+  {
+    "id": "def_metal_3",
+    "name": "강철방벽",
+    "type": "defense",
+    "element": "금",
+    "cost": 2,
+    "attackPower": 0,
+    "defensePower": 15,
+    "description": "순수하게 방어력 15로 공격을 막는다."
+  },
+  {
+    "id": "def_metal_4",
+    "name": "금강의수호",
+    "type": "defense",
+    "element": "금",
+    "cost": 2,
+    "attackPower": 0,
+    "defensePower": 11,
+    "description": "방어에 성공하면 2턴 동안 자신의 공격력·방어력이 상승한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+  },
+  {
+    "id": "def_metal_5",
+    "name": "검왕의성벽",
+    "type": "defense",
+    "element": "금",
+    "cost": 3,
+    "attackPower": 0,
+    "defensePower": 16,
+    "description": "방어에 성공하면 3턴 동안 자신의 공격력이 8 증가한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
   },
   {
     "id": "def_water_1",
-    "name": "물의 장막",
+    "name": "물방패",
+    "type": "defense",
+    "element": "수",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 8,
+    "description": "순수하게 방어력 8로 공격을 막는다."
+  },
+  {
+    "id": "def_water_2",
+    "name": "치유의물결",
+    "type": "defense",
+    "element": "수",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 5,
+    "description": "방어에 성공하면 HP를 4 회복한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+  },
+  {
+    "id": "def_water_3",
+    "name": "파도방벽",
     "type": "defense",
     "element": "수",
     "cost": 2,
     "attackPower": 0,
     "defensePower": 15,
-    "description": "물의 장막을 펼쳐 공격을 흡수한다."
+    "description": "순수하게 방어력 15로 공격을 막는다."
   },
   {
-    "id": "terrain_lava_1",
-    "name": "용암지대",
+    "id": "def_water_4",
+    "name": "정화의물",
+    "type": "defense",
+    "element": "수",
+    "cost": 2,
+    "attackPower": 0,
+    "defensePower": 11,
+    "description": "방어에 성공하면 HP를 8 회복한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+  },
+  {
+    "id": "def_water_5",
+    "name": "해일의성채",
+    "type": "defense",
+    "element": "수",
+    "cost": 3,
+    "attackPower": 0,
+    "defensePower": 16,
+    "description": "방어에 성공하면 HP를 12 회복한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+  },
+  {
+    "id": "terrain_wood_1",
+    "name": "울창한밀림",
+    "type": "terrain",
+    "element": "목",
+    "cost": 0,
+    "attackPower": 0,
+    "defensePower": 0,
+    "synergyBonus": 5,
+    "description": "필드에 울창한밀림을(를) 깐다. 목속성 카드와, 목속성이 상생하는 속성의 카드 위력을 각각 5 강화한다."
+  },
+  {
+    "id": "terrain_wood_2",
+    "name": "이슬맺힌안개숲",
+    "type": "terrain",
+    "element": "목",
+    "cost": 0,
+    "attackPower": 0,
+    "defensePower": 0,
+    "synergyBonus": 0,
+    "description": "목속성 카드의 코스트가 1 감소한다 (효과 미구현 - 현재는 지형 교체만 적용됨)"
+  },
+  {
+    "id": "terrain_fire_1",
+    "name": "화산지대",
     "type": "terrain",
     "element": "화",
     "cost": 0,
     "attackPower": 0,
     "defensePower": 0,
     "synergyBonus": 5,
-    "description": "필드에 용암지대를 깐다. 다른 지형 카드가 나오기 전까지 유지되며, 화생토(火生土)로 토(土) 속성 카드의 위력을 강화한다."
+    "description": "필드에 화산지대을(를) 깐다. 화속성 카드와, 화속성이 상생하는 속성의 카드 위력을 각각 5 강화한다."
   },
   {
-    "id": "effect_lightning_1",
-    "name": "전류",
+    "id": "terrain_fire_2",
+    "name": "열대야",
+    "type": "terrain",
+    "element": "화",
+    "cost": 0,
+    "attackPower": 0,
+    "defensePower": 0,
+    "synergyBonus": 0,
+    "description": "화속성 카드의 코스트가 1 감소한다 (효과 미구현 - 현재는 지형 교체만 적용됨)"
+  },
+  {
+    "id": "terrain_earth_1",
+    "name": "광물지대",
+    "type": "terrain",
+    "element": "토",
+    "cost": 0,
+    "attackPower": 0,
+    "defensePower": 0,
+    "synergyBonus": 5,
+    "description": "필드에 광물지대을(를) 깐다. 토속성 카드와, 토속성이 상생하는 속성의 카드 위력을 각각 5 강화한다."
+  },
+  {
+    "id": "terrain_earth_2",
+    "name": "건조한사막",
+    "type": "terrain",
+    "element": "토",
+    "cost": 0,
+    "attackPower": 0,
+    "defensePower": 0,
+    "synergyBonus": 0,
+    "description": "토속성 카드의 코스트가 1 감소한다 (효과 미구현 - 현재는 지형 교체만 적용됨)"
+  },
+  {
+    "id": "terrain_metal_1",
+    "name": "협곡광산",
+    "type": "terrain",
+    "element": "금",
+    "cost": 0,
+    "attackPower": 0,
+    "defensePower": 0,
+    "synergyBonus": 5,
+    "description": "필드에 협곡광산을(를) 깐다. 금속성 카드와, 금속성이 상생하는 속성의 카드 위력을 각각 5 강화한다."
+  },
+  {
+    "id": "terrain_metal_2",
+    "name": "서늘한밤",
+    "type": "terrain",
+    "element": "금",
+    "cost": 0,
+    "attackPower": 0,
+    "defensePower": 0,
+    "synergyBonus": 0,
+    "description": "금속성 카드의 코스트가 1 감소한다 (효과 미구현 - 현재는 지형 교체만 적용됨)"
+  },
+  {
+    "id": "terrain_water_1",
+    "name": "습지대",
+    "type": "terrain",
+    "element": "수",
+    "cost": 0,
+    "attackPower": 0,
+    "defensePower": 0,
+    "synergyBonus": 5,
+    "description": "필드에 습지대을(를) 깐다. 수속성 카드와, 수속성이 상생하는 속성의 카드 위력을 각각 5 강화한다."
+  },
+  {
+    "id": "terrain_water_2",
+    "name": "장마철",
+    "type": "terrain",
+    "element": "수",
+    "cost": 0,
+    "attackPower": 0,
+    "defensePower": 0,
+    "synergyBonus": 0,
+    "description": "수속성 카드의 코스트가 1 감소한다 (효과 미구현 - 현재는 지형 교체만 적용됨)"
+  },
+  {
+    "id": "effect_wood_1",
+    "name": "목독지대",
+    "type": "effect",
+    "element": "목",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 0,
+    "tickDamage": 4,
+    "durationTurns": 3,
+    "description": "3턴 동안 매 턴이 넘어갈 때마다 생존한 전원에게 4의 피해를 준다."
+  },
+  {
+    "id": "effect_wood_2",
+    "name": "얽힌덤불",
+    "type": "effect",
+    "element": "목",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 0,
+    "tickDamage": 0,
+    "durationTurns": 2,
+    "description": "상대 전원의 카드 코스트가 1 증가한다 (효과 미구현 - 현재는 필드에 설치만 되고 아무 효과도 없음)"
+  },
+  {
+    "id": "effect_fire_1",
+    "name": "화염지대",
+    "type": "effect",
+    "element": "화",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 0,
+    "tickDamage": 6,
+    "durationTurns": 3,
+    "description": "3턴 동안 매 턴이 넘어갈 때마다 생존한 전원에게 6의 피해를 준다."
+  },
+  {
+    "id": "effect_fire_2",
+    "name": "작열의기운",
+    "type": "effect",
+    "element": "화",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 0,
+    "tickDamage": 0,
+    "durationTurns": 3,
+    "description": "화속성 카드의 피해가 4 증가한다 (효과 미구현 - 현재는 필드에 설치만 되고 아무 효과도 없음)"
+  },
+  {
+    "id": "effect_earth_1",
+    "name": "황사지대",
+    "type": "effect",
+    "element": "토",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 0,
+    "tickDamage": 4,
+    "durationTurns": 3,
+    "description": "3턴 동안 매 턴이 넘어갈 때마다 생존한 전원에게 4의 피해를 준다."
+  },
+  {
+    "id": "effect_earth_2",
+    "name": "지반균열",
+    "type": "effect",
+    "element": "토",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 0,
+    "tickDamage": 5,
+    "durationTurns": 2,
+    "description": "2턴 동안 매 턴이 넘어갈 때마다 생존한 전원에게 5의 피해를 준다."
+  },
+  {
+    "id": "effect_metal_1",
+    "name": "금속먼지지대",
     "type": "effect",
     "element": "금",
     "cost": 1,
     "attackPower": 0,
     "defensePower": 0,
-    "tickDamage": 5,
+    "tickDamage": 4,
     "durationTurns": 3,
-    "description": "3턴 동안 매 턴이 넘어갈 때마다 생존한 전원에게 5의 피해를 준다. 다른 효과 카드와 중첩 가능."
+    "description": "3턴 동안 매 턴이 넘어갈 때마다 생존한 전원에게 4의 피해를 준다."
+  },
+  {
+    "id": "effect_metal_2",
+    "name": "정기서린땅",
+    "type": "effect",
+    "element": "금",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 0,
+    "tickDamage": 0,
+    "durationTurns": 3,
+    "description": "자신의 최대 공격 코스트가 1 증가한다 (효과 미구현 - 현재는 필드에 설치만 되고 아무 효과도 없음)"
+  },
+  {
+    "id": "effect_water_1",
+    "name": "물안개지대",
+    "type": "effect",
+    "element": "수",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 0,
+    "tickDamage": 3,
+    "durationTurns": 3,
+    "description": "3턴 동안 매 턴이 넘어갈 때마다 생존한 전원에게 3의 피해를 준다."
+  },
+  {
+    "id": "effect_water_2",
+    "name": "청량한안개",
+    "type": "effect",
+    "element": "수",
+    "cost": 1,
+    "attackPower": 0,
+    "defensePower": 0,
+    "tickDamage": 0,
+    "durationTurns": 3,
+    "description": "수속성 카드의 코스트가 1 감소한다 (효과 미구현 - 현재는 필드에 설치만 되고 아무 효과도 없음)"
   }
 ]

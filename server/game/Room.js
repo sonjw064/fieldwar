@@ -217,12 +217,18 @@ class Room {
     this.terrain = terrainInfo; // { cardId, element, synergyBonus }
   }
 
-  // cardElement 속성의 카드가 지금 깔린 지형의 상생 보너스를 받는지 확인.
-  // 받으면 보너스 수치를, 안 받으면(지형이 없거나 상생 대상이 아니면) 0을 반환
+  // cardElement 속성의 카드가 지금 깔린 지형의 보너스를 받는지 확인.
+  // 지형은 "자기 자신과 같은 속성"이거나 "자기가 상생하는 속성"의 카드를 강화함
+  // (7단계 카드 설계 개편, 2026-08-27 — 기존에는 상생 대상만 강화했으나, 새 지형 카드들이
+  //  "자기 속성 + 상생 대상 속성"을 동시에 강화하는 걸로 설계돼서 기존 지형 카드도 같이 확장 적용됨)
+  // 받으면 보너스 수치를, 안 받으면(지형이 없거나 둘 다 아니면) 0을 반환
   getTerrainSynergyBonus(cardElement) {
     if (!this.terrain) return 0;
     const boostedElement = GENERATE_MAP[this.terrain.element];
-    return boostedElement === cardElement ? this.terrain.synergyBonus : 0;
+    if (cardElement === this.terrain.element || cardElement === boostedElement) {
+      return this.terrain.synergyBonus;
+    }
+    return 0;
   }
 
   // ---- 필드: 효과 ----
