@@ -38,6 +38,11 @@ class Room {
     // 카드를 뽑아올 덱 (cardId 문자열 배열). 게임 시작 시 dealHandsToRoom()에서 채워짐.
     // 카드를 한 장 쓸 때마다 여기서 한 장을 뽑아 손패를 항상 5장으로 유지함 (6단계, 2026-08-25 추가)
     this.deck = [];
+
+    // 다중 대상 공격(흙먼지폭풍 등) 진행 중일 때 남은 대상을 담아두는 큐 (8단계 Phase 3, 2026-08-26)
+    // { attackerSocketId, cardId, cost, element, attackPower, attackTerrainBonus, armorPiercing,
+    //   lifestealPercent, healOnUse, appliedStatuses, remainingTargets: [socketId, ...] } | null
+    this.pendingMultiTarget = null;
   }
 
   // 플레이어 추가
@@ -55,6 +60,10 @@ class Room {
       maxAttackCost: 3, // 매 턴 지급되는 공격 코스트 (지금은 전원 고정 3)
       defenseCost: 0,
       maxDefenseCost: 3, // 매 턴 지급되는 방어 코스트 (지금은 전원 고정 3)
+      // 지속상태 목록 (8단계 Phase 2, 2026-08-26 추가) - { type, amount, remainingTurns }
+      // type: stun(기절)/attackLock(공격봉쇄)/defenseLock(방어봉쇄)/dot(화상)/attackBuff/defBuff
+      // 같은 type이 여러 개 동시에 쌓일 수 있음(필드 효과처럼 인스턴스별로 따로 관리)
+      statuses: [],
     });
   }
 
@@ -87,9 +96,11 @@ class Room {
   //   방어 코스트를 쓸 수 있어야 합니다.
   // - 공격 코스트: 어차피 공격은 자기 턴에만 쓸 수 있어서(게임 로직상 막혀있음) 전원을 리셋해도
   //   무해하고, 로직을 하나로 통일할 수 있어 더 단순합니다.
+  // 8단계 Phase 3(2026-08-26): 정기서린땅 등으로 얻은 maxAttackCostBuff 상태가 있으면
+  // 기본 maxAttackCost에 더해서 채워줌 (base 값 자체는 건드리지 않고, 매번 다시 계산함)
   resetAllCosts() {
     this.players.forEach((p) => {
-      p.attackCost = p.maxAttackCost;
+      p.attackCost = p.maxAttackCost + this.getStatusTotal(p.socketId, "maxAttackCostBuff");
       p.defenseCost = p.maxDefenseCost;
     });
   }
@@ -115,23 +126,39 @@ class Room {
     return this.turnOrder[this.currentTurnIndex];
   }
 
-  // 다음 턴으로 넘김 (죽은/나간 사람은 건너뛰도록 구조만 잡아둠)
+  // 다음 턴으로 넘김 (죽은 사람은 건너뜀).
+  // 8단계 Phase 2(2026-08-26): 기절(stun) 상태인 사람도 이 턴은 행동할 수 없으므로 건너뛰고,
+  // 그 사람의 기절 남은 턴을 1 줄임(0 이하면 제거). 기절은 다른 지속상태(attackLock/defenseLock/
+  // dot/버프)와 달리 "전역 턴마다 차감"이 아니라 "그 사람 차례에 도달했을 때만" 소모되는데,
+  // 안 그러면 애초에 턴을 건너뛴다는 효과 자체가 성립하지 않기 때문 (tickPlayerStatuses()는
+  // stun을 건드리지 않고 그냥 지나감 - 그쪽 설명 참고).
+  // 건너뛴 사람 목록을 반환({ socketId, remainingTurns }[]) - 호출부에서 로그/방송에 사용
   advanceTurn() {
     const total = this.turnOrder.length;
-    if (total === 0) return;
+    if (total === 0) return [];
 
+    const skipped = [];
     let nextIndex = this.currentTurnIndex;
     for (let i = 0; i < total; i++) {
       nextIndex = (nextIndex + 1) % total;
       const candidateId = this.turnOrder[nextIndex];
       const candidatePlayer = this.getPlayer(candidateId);
-      // 살아있는 플레이어를 찾을 때까지 건너뜀 (지금은 전원 isAlive=true라 바로 걸림)
-      if (candidatePlayer && candidatePlayer.isAlive) {
-        this.currentTurnIndex = nextIndex;
-        this.resetAllCosts();
-        return;
+      if (!candidatePlayer || !candidatePlayer.isAlive) continue; // 죽은/나간 사람은 그냥 건너뜀
+
+      const stunIndex = candidatePlayer.statuses.findIndex((s) => s.type === "stun");
+      if (stunIndex !== -1) {
+        const stun = candidatePlayer.statuses[stunIndex];
+        stun.remainingTurns -= 1;
+        skipped.push({ socketId: candidatePlayer.socketId, remainingTurns: stun.remainingTurns });
+        if (stun.remainingTurns <= 0) candidatePlayer.statuses.splice(stunIndex, 1);
+        continue; // 기절 상태라 이번 차례는 주지 않고 계속 다음 후보를 찾음
       }
+
+      this.currentTurnIndex = nextIndex;
+      this.resetAllCosts();
+      return skipped;
     }
+    return skipped; // 전원이 죽었거나 기절 상태인 극단적인 경우 (기존에도 처리 안 하던 엣지케이스)
   }
 
   // ---- 카드 인스턴스 id 발급 (1씩 증가) ----
@@ -182,8 +209,10 @@ class Room {
   // ---- 방어 대기 상태 관리 ----
   // data.appliedDefenses는 이번 방어 판정 동안 낸 방어 카드들을 순서대로 쌓아두는 배열입니다.
   // (2026-08-27: 방어자가 한 번의 방어에 여러 장을 낼 수 있게 되면서 추가됨)
+  // data.appliedStatuses는 이번 전투 중 CC/DoT/버프가 누구에게 부여됐는지 쌓아두는 배열입니다.
+  // (8단계 Phase 2, 2026-08-26 추가 - 로그/방송용. 상태 자체는 addStatus()로 이미 즉시 적용되어 있음)
   setPendingDefense(data) {
-    this.pendingDefense = { appliedDefenses: [], ...data };
+    this.pendingDefense = { appliedDefenses: [], appliedStatuses: [], ...data };
   }
 
   clearPendingDefense() {
@@ -194,6 +223,34 @@ class Room {
   addAppliedDefense(entry) {
     if (!this.pendingDefense) return;
     this.pendingDefense.appliedDefenses.push(entry);
+  }
+
+  // 지금 진행 중인 전투에 새로 부여된 상태 하나를 기록 (로그/방송용)
+  addAppliedStatus(entry) {
+    if (!this.pendingDefense) return;
+    this.pendingDefense.appliedStatuses.push(entry);
+  }
+
+  // ---- 다중 대상 공격 큐 (8단계 Phase 3, 2026-08-26) ----
+  // 흙먼지폭풍 등 여러 명을 동시에 대상으로 하는 공격 카드를 순차적으로 처리하기 위한 큐.
+  // 기존 단일 대상 공격→방어→finalizeDefense 사이클을 대상 한 명씩 재사용하는 방식이라
+  // pendingDefense와는 별개로 "이번 카드로 아직 안 맞은 사람들"만 여기 담아둠
+  setMultiTargetQueue(data) {
+    this.pendingMultiTarget = { ...data };
+  }
+
+  // 큐에서 다음 대상을 하나 꺼냄 (없으면 null)
+  popNextMultiTarget() {
+    if (!this.pendingMultiTarget || this.pendingMultiTarget.remainingTargets.length === 0) return null;
+    return this.pendingMultiTarget.remainingTargets.shift();
+  }
+
+  hasMoreMultiTargets() {
+    return !!this.pendingMultiTarget && this.pendingMultiTarget.remainingTargets.length > 0;
+  }
+
+  clearMultiTargetQueue() {
+    this.pendingMultiTarget = null;
   }
 
   // HP를 amount만큼 깎고, 0 이하가 되면 사망 처리. 변경된 플레이어를 반환
@@ -209,6 +266,58 @@ class Room {
 
   getAlivePlayers() {
     return this.players.filter((p) => p.isAlive);
+  }
+
+  // HP를 amount만큼 회복시킴 (maxHp 초과 불가). 이미 죽은 사람은 회복해도 되살아나지 않도록 무시함
+  // (8단계 Phase 1, 2026-08-26 — 흡혈/고정회복/방어 성공 시 회복 카드에서 사용)
+  healPlayer(socketId, amount) {
+    const player = this.getPlayer(socketId);
+    if (!player || !player.isAlive || amount <= 0) return player;
+    player.hp = Math.min(player.maxHp, player.hp + amount);
+    return player;
+  }
+
+  // ---- 지속상태 (CC/DoT/버프디버프) - 8단계 Phase 2, 2026-08-26 추가 ----
+  // 상태 하나를 추가 (같은 type이 여러 개 쌓여도 됨 - 필드 효과와 같은 방식)
+  addStatus(socketId, status) {
+    const player = this.getPlayer(socketId);
+    if (!player) return;
+    player.statuses.push({ ...status });
+  }
+
+  // 특정 type의 상태가 하나라도 활성 상태인지 (attackLock/defenseLock/stun 체크용)
+  hasActiveStatus(socketId, type) {
+    const player = this.getPlayer(socketId);
+    return !!player && player.statuses.some((s) => s.type === type);
+  }
+
+  // 특정 type의 상태들의 amount 합산 (attackBuff/defBuff 계산용)
+  getStatusTotal(socketId, type) {
+    const player = this.getPlayer(socketId);
+    if (!player) return 0;
+    return player.statuses
+      .filter((s) => s.type === type)
+      .reduce((sum, s) => sum + s.amount, 0);
+  }
+
+  // 턴이 넘어갈 때 호출: dot(화상) 상태는 데미지를 주고, stun을 제외한 모든 상태의 남은 턴을
+  // 1씩 줄인 뒤 0 이하가 된 상태는 제거함. stun은 advanceTurn()이 그 사람 차례에 도달했을 때만
+  // 소모하므로 여기서는 건드리지 않음(그대로 두면 필터 조건(remainingTurns > 0)에 걸려도 살아남음).
+  // 화상으로 입은 피해 목록을 반환 (호출한 쪽에서 로그 방송용으로 사용)
+  tickPlayerStatuses() {
+    const dotTicks = [];
+    this.players.forEach((p) => {
+      p.statuses.forEach((s) => {
+        if (s.type === "stun") return; // 기절은 advanceTurn()에서만 차감됨
+        if (s.type === "dot" && p.isAlive) {
+          this.applyDamage(p.socketId, s.amount);
+          dotTicks.push({ socketId: p.socketId, damage: s.amount, remainingTurns: s.remainingTurns - 1 });
+        }
+        s.remainingTurns -= 1;
+      });
+      p.statuses = p.statuses.filter((s) => s.remainingTurns > 0);
+    });
+    return dotTicks;
   }
 
   // ---- 필드: 지형 ----
@@ -229,6 +338,30 @@ class Room {
       return this.terrain.synergyBonus;
     }
     return 0;
+  }
+
+  // 지형의 코스트 감면 확인 (8단계 Phase 3, 2026-08-26 — 이슬맺힌안개숲 등).
+  // 상생 대상까지는 확장하지 않음 - 카드 설명이 "같은 속성"만 명시하고 있음
+  getTerrainCostReduction(cardElement) {
+    if (!this.terrain || cardElement !== this.terrain.element) return 0;
+    return this.terrain.costReduction || 0;
+  }
+
+  // 필드효과의 코스트 감면 합산 (8단계 Phase 3, 2026-08-26 — 청량한안개 등).
+  // 필드 카드는 전원에게 공평하게 적용된다는 기존 원칙대로, 대상을 가리지 않고 element만 일치하면 적용됨
+  getEffectCostReduction(cardElement) {
+    return this.effects
+      .filter((e) => e.element === cardElement)
+      .reduce((sum, e) => sum + (e.costReductionAmount || 0), 0);
+  }
+
+  // 필드효과의 공격력 보너스 합산 (8단계 Phase 3, 2026-08-26 — 작열의기운 등).
+  // 지형 synergyBonus와 비슷하지만 상생 대상까지는 확장하지 않음 - 카드 설명이 "같은 속성"만 명시.
+  // 전원에게 공평하게 적용되는 원칙은 동일함
+  getEffectDamageBonus(cardElement) {
+    return this.effects
+      .filter((e) => e.element === cardElement)
+      .reduce((sum, e) => sum + (e.damageBonusAmount || 0), 0);
   }
 
   // ---- 필드: 효과 ----
@@ -274,9 +407,13 @@ class Room {
         handCount: p.hand.length,
         // 코스트는 대부분의 카드 게임에서 마나처럼 공개 정보이므로 그대로 노출
         attackCost: p.attackCost,
-        maxAttackCost: p.maxAttackCost,
+        // maxAttackCostBuff 등으로 실제로 늘어난 값을 그대로 노출 (8단계 Phase 3, 2026-08-26)
+        // - 안 그러면 클라이언트 코스트 점(pip) 렌더링이 attackCost > maxAttackCost로 어긋남
+        maxAttackCost: p.maxAttackCost + this.getStatusTotal(p.socketId, "maxAttackCostBuff"),
         defenseCost: p.defenseCost,
         maxDefenseCost: p.maxDefenseCost,
+        // 지속상태(기절/봉쇄/화상/버프)도 전원에게 공개되는 정보 (8단계 Phase 2, 2026-08-26)
+        statuses: p.statuses.map((s) => ({ type: s.type, amount: s.amount, remainingTurns: s.remainingTurns })),
       })),
       // 게임 중일 때만 의미있는 값이지만, 항상 같이 내려줘도 무방
       currentTurnSocketId: this.status === "playing" ? this.getCurrentTurnSocketId() : null,
@@ -289,6 +426,9 @@ class Room {
         cardName: e.cardName,
         tickDamage: e.tickDamage,
         remainingTurns: e.remainingTurns,
+        // 카드 설명을 그대로 보여줘서, 종류가 늘어도 클라이언트가 문구를 직접 조립할 필요가 없게 함
+        // (8단계 Phase 3, 2026-08-26)
+        description: e.description,
       })),
     };
   }

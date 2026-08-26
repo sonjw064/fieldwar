@@ -195,17 +195,53 @@ fieldwar/
    - 카드가 65장 → 실제로는 70장(설계 도중 효과 카드가 속성별 1장 → 2장으로 늘어남)이 됨. 덱은 여전히 카드 종류당 6장씩 복사해서 구성되므로 총 420장 규모
    - `Room` 직접 호출로 지형 자기 속성/상생 대상 보너스 로직만 빠르게 검증(수동 스모크 테스트) 후 서버 재기동 완료 — 개발자가 브라우저에서 재테스트 예정
 
+8. **미구현 메커닉 중 "즉시효과" 4종 구현 (8단계 Phase 1, 2026-08-26)**
+   - 개발자가 "단계별로: 즉시효과 먼저" 진행 방식을 선택 — 새로운 지속 상태(persistent status) 없이 카드 사용/방어 확정 시점에 바로 계산·적용되는 것들만 먼저 구현하고, CC/DoT/버프/다중대상/코스트증감처럼 여러 턴 상태를 들고 있어야 하는 것들은 다음 라운드로 미룸
+   - 대상 카드 10장, `cards.json`에 새 필드 추가 (다른 60장은 그대로): `armorPiercing`(작열의일격=5, 방어력 무시하고 추가로 들어가는 고정 피해), `lifestealPercent`(흡수의물결=50, 실제로 들어간 피해 기준 흡혈), `healOnUse`(치유의파동=6/해일=10, 카드 사용 즉시 피해량과 무관하게 고정 회복), `counterDamage`(화염반사=5/불꽃되받기=8/화염의성벽=12, 방어 카드를 냈으면 방어 성공 여부와 무관하게 발동하는 반격 피해), `healOnDefend`(치유의물결=4/정화의물=8/해일의성채=12, 방어 카드를 냈으면 발동하는 회복)
+   - `Room.js`에 `healPlayer(socketId, amount)` 추가: maxHp 초과 불가, 이미 사망한 플레이어는 회복해도 되살아나지 않도록 무시
+   - `gameHandlers.js`: `game:playCard`에서 `healOnUse`는 카드를 낸 즉시(방어 결과와 무관하게) 적용하고, `armorPiercing`/`lifestealPercent`/`healOnUse`를 `pendingDefense`에 실어서 `finalizeDefense`가 참조하도록 함. `finalizeDefense`를 재작성: `damageDealt = max(0, 공격력 - 방어력) + armorPiercing`으로 계산, 그 다음 `healOnDefend`(방어자 회복, 이미 죽었으면 스킵) → 흡혈(`lifestealHeal`, 실제 `damageDealt` 기준) → `counterDamage`(공격자에게 반격) 순서로 적용. `game:combatResult`에 `armorPiercing`/`attackerHp`/`attackerIsAlive`/`healOnUse`/`lifestealHeal`/`healOnDefend`/`counterDamage` 필드 추가
+   - **새로 생긴 엣지케이스 처리**: 반격 피해로 공격자가 "자기 턴 도중" 사망할 수 있게 됨 → 3인 이상 게임에서 방치하면 죽은 사람의 턴에서 그대로 멈추는 소프트락이 생김. `game:endTurn` 안에 있던 턴 전환 로직(턴 넘기기 → 효과 틱 → `game:effectsTicked` → `maybeEndGame` → `room:updated` → `game:turnChanged`)을 `advanceTurnAndTick(io, roomId, room)` 공용 함수로 추출해서, `game:endTurn`과 `finalizeDefense`(반격사 자동 턴 넘김) 양쪽에서 재사용하도록 리팩터링함
+   - `game:confirmDefense`의 `room.addAppliedDefense(...)`/`game:defenseCardApplied` 페이로드에도 `counterDamage`/`healOnDefend` 필드 추가 (카드별로 몇 장 냈는지에 따라 합산됨)
+   - 클라이언트(`main.js`): `game:combatResult` 로그에 위 즉시효과들을 강조색(`bonus-text`)으로 덧붙여 표시 ("관통 피해 5 추가", "OO이(가) 흡혈로 HP 3 회복" 등). HP 바 자체는 기존처럼 뒤이은 `room:updated`로 자동 갱신되므로 별도 처리 불필요
+   - `Room`/`cards.json`을 직접 참조하는 인메모리 테스트 스크립트로 11개 시나리오(관통 피해 계산, 흡혈 계산, 고정회복 적용, 회복 상한 clamp, 사망자 회복 무시, 방어 성공 시 회복, 반격으로 인한 공격자 사망 + advanceTurn 시 다음 생존자에게 턴 이전) 전부 통과 확인 후 삭제. 서버 재기동 완료 — 개발자가 브라우저에서 재테스트 예정
+   - `card_design.md` 해당 10장 행의 "비고"를 `[구현완료 - 2026-08-26]`로 갱신, 맨 아래 "정리" 목록에서 3·6·7번 항목에 취소선 처리
+
+9. **지속상태 인프라 + CC/DoT/버프·디버프 구현 (8단계 Phase 2, 2026-08-26)**
+   - 개발자가 "상태 인프라 + CC/DoT/버프디버프 3개 함께" 진행을 선택 — 이 셋은 전부 "여러 턴 지속되는 상태"라는 공통 인프라를 공유하므로 한 번에 진행하고, 다중대상/코스트증감은 각각 다른 구조가 필요해서 다음 라운드로 보류함
+   - **지속시간 계산 방식**: 개발자와 상의해서 기존 필드효과(`tickEffects`)와 동일하게 **"전역 턴이 넘어갈 때마다 차감"** 방식으로 확정(간단하고 기존 코드와 일관적). 3인 이상 게임에서는 카드 설명의 "다음 턴"과 정확히 안 맞을 수 있다는 한계가 있지만, 필드효과도 이미 같은 특성이라 감수하기로 함
+   - **단, 기절(stun)은 예외**: 전역 틱이 아니라 `Room.advanceTurn()`이 그 플레이어의 턴에 "도달하는 시점"에만 소모됨(그 사람을 건너뛰고 다음 생존자를 계속 찾으면서 stun의 `remainingTurns`를 그때만 1 줄임) — 안 그러면 턴을 건너뛴다는 효과 자체가 성립하지 않기 때문. `advanceTurn()`의 반환 타입이 `void`에서 "이번에 건너뛴 사람 목록"(`{ socketId, remainingTurns }[]`)으로 바뀜
+   - `Room.js`: 플레이어 객체에 `statuses: []` 필드 추가(`{ type, amount, remainingTurns }[]`, type은 `stun`/`attackLock`/`defenseLock`/`dot`/`attackBuff`/`defBuff`, 같은 type도 여러 개 중첩 가능 — 필드효과처럼 인스턴스별 관리). 새 메서드: `addStatus`/`hasActiveStatus`/`getStatusTotal`(버프 합산용)/`tickPlayerStatuses()`(DoT 데미지 적용 + stun 제외 전원 차감, DoT 피해 목록 반환). `setPendingDefense`에 `appliedStatuses: []` 추가 + `addAppliedStatus()` 신규(로그 방송용, 실제 상태 적용은 `addStatus`가 즉시 처리). `toPublicView()`의 players에 `statuses` 추가
+   - `gameHandlers.js`: `advanceTurnAndTick`이 `advanceTurn()`의 기절-스킵 목록을 받아 `game:playerStunned`로 방송하고, `tickEffects()` 다음에 `tickPlayerStatuses()`도 호출해서 결과가 있으면 `game:statusesTicked`로 방송. `game:playCard`에 `attackLock` 체크(`ATTACK_LOCKED` 에러) 추가하고 `effectiveAttackPower`에 자신의 `attackBuff` 합산을 반영, 카드를 낸 즉시 대상에게 CC/DoT를, 자신에게 자기버프를 적용. `game:confirmDefense`에 `defenseLock` 체크(`DEFENSE_LOCKED` 에러, 방어 포기(0장)는 여전히 허용) 추가하고 `effectiveDefensePower`에 자신의 `defBuff` 합산을 반영, 방어 카드마다 "방어 성공 시" CC(공격자에게)/자기버프(자신에게)를 즉시 적용. `finalizeDefense`는 `appliedStatuses`를 그대로 `game:combatResult`에 실어 보내기만 함(상태 적용 자체는 이미 위에서 끝남)
+   - 대상 카드 14장(목 CC 6장/화 DoT 2장/금 버프 6장)에 `ccEffect`/`ccDuration`, `dotDamage`/`dotDuration`, `attackBuffAmount`/`attackBuffDuration`/`defBuffAmount`/`defBuffDuration` 필드 추가. "금강의기세"/"금강의수호"의 "소폭 상승"은 개발자 확인 없이 각 +4(2턴)로 잠정 확정(밸런싱 단계에서 조정 가능)
+   - 클라이언트(`main.js`): `buildStatusCardInnerHtml`이 각 플레이어의 `statuses`를 작은 배지(`buildStatusBadgesHtml`, 타입별 아이콘+라벨+남은 턴)로 표시. `game:combatResult` 로그에 `appliedStatuses` 문구를 강조색으로 이어붙임. 신규 리스너 2개: `game:playerStunned`(기절로 턴 건너뜀 로그), `game:statusesTicked`(화상 틱 데미지 로그). `style.css`에 `.status-badges`/`.status-badge` 추가
+   - `Room`을 직접 참조하는 인메모리 테스트 스크립트로 37개 체크(1턴/2턴 기절의 스킵·소멸 시점, 화상 데미지·소멸, attackLock/defenseLock 감지, attackBuff/defBuff 합산·소멸, cards.json 필드 반영, 전원 기절/사망 극단 케이스에서 무한루프 없음) 전부 통과 확인 후 삭제. 서버 재기동 완료 — 개발자가 브라우저에서 재테스트 예정
+
+10. **다중 대상 공격 + 코스트 증감 구현 — `card_design.md`의 9개 미구현 메커닉 전부 소진 (8단계 Phase 3, 2026-08-26)**
+   - 개발자가 "남은 것 마저 제작해줘"로 요청. 토(土) 방어 카드 3장의 "방어 성공 시 아군 전체 ~"는 이 게임에 팀 개념이 없어서(순수 개인전) 개발자와 상의해 **"자기 자신에게만 적용"**으로 확정(금속성 자기버프 카드들과 같은 결)
+   - **다중 대상 전투 흐름**: 새 이벤트 없이 기존 단일 대상 공격→방어→`finalizeDefense` 사이클을 대상별로 순차 재사용. `Room.pendingMultiTarget`(`{ ...공격정보, remainingTargets: [socketId,...] }`)에 대상 큐를 담아두고, `setMultiTargetQueue`/`popNextMultiTarget`/`hasMoreMultiTargets`/`clearMultiTargetQueue` 4개 메서드로 관리. `gameHandlers.js`에 `beginAttackOnTarget(io, roomId, room, attackInfo, targetSocketId)` 공용 함수를 신설해서(기존 `game:playCard`의 "pendingDefense 세팅 + defenseRequest/attackAnnounced 방송" 부분을 그대로 추출한 것) 단일 대상은 1회, 다중 대상은 대상마다 호출. `finalizeDefense`가 한 명을 확정할 때마다 `room.hasMoreMultiTargets()`를 확인해서 있으면 다음 대상으로 바로 이어감(반격으로 공격자가 자기 턴 도중 사망하면 큐를 즉시 비워서 남은 대상 처리를 중단함)
+   - **코스트 증감**: 공용 함수 `computeEffectiveCost(room, socketId, card)`를 신설해서 지형 감면(`Room.getTerrainCostReduction`) + 필드효과 감면(`Room.getEffectCostReduction`, 예: 청량한안개) - 상대가 건 코스트증가(`costUp` 상태 합산)로 실제 코스트를 계산하고, `game:playCard`/`game:confirmDefense`/`game:playFieldCard` 전부와 `getHandView()`(손패에 `effectiveCost` 필드로 노출)에서 공용으로 씀
+   - **비대칭 vs 공평 효과 구분**: "상대 전원 코스트 증가"(얽힌덤불, 자신 제외)와 "자신 최대 코스트 증가"(정기서린땅)는 특정 대상에게만 걸리는 효과라 기존 Phase 2 `statuses` 배열(타입 `costUp`/`maxAttackCostBuff`)로 구현. "전원 공평 적용"이 원칙인 필드 카드 특성상, 청량한안개(전원의 수속성 카드 코스트 감소)만 예외적으로 기존 필드효과(`this.effects`) 배열에 `costReductionAmount` 필드를 얹어 구현(대상을 가리지 않고 속성만 일치하면 적용됨). `Room.resetAllCosts()`가 `maxAttackCostBuff` 총합을 매 턴 반영하도록 수정, `toPublicView()`의 `maxAttackCost`도 버프 반영된 실제 값으로 노출(안 그러면 코스트 점 렌더링이 어긋남)
+   - 대상 카드 14장에 필드 추가: `multiTarget`(토 공격 3장), `armorPiercing: 8`(맨틀폭발, 기존 Phase 1 필드 재사용), `damageReductionAmount`/`damageReductionDuration`(신규, 대지의보호막/대지의성채), `defBuffAmount`/`defBuffDuration`(지반강화, 기존 Phase 2 필드 재사용), `costReduction`(지형 5장), `costUpAmount`(얽힌덤불)/`maxAttackCostBuffAmount`(정기서린땅)/`costReductionAmount`(청량한안개, 전부 기존 `durationTurns`를 재사용해서 별도 duration 필드 안 만듦)
+   - **누락분 발견 및 추가 수정**: 카드 전수 검사 중 `effect_fire_2`(작열의기운, "화속성 카드 데미지 증가")가 원래 목록 9개 어디에도 명시적으로 안 걸려있어서 최초 계획에서 빠졌던 걸 뒤늦게 발견 — 지형의 `synergyBonus`와 같은 결로 `Room.getEffectDamageBonus(cardElement)`(필드효과 배열에서 같은 속성 합산)를 추가하고 `damageBonusAmount` 필드로 구현, `attackEffectBonus`로 `attackTerrainBonus`와 나란히 계산·방송되도록 함. **`cards.json` 70장 전체에 "(효과 미구현)" 문구가 더 이상 하나도 없음을 정규식으로 확인 완료**
+   - **필드 상태 표시 리팩터링**: 지형/효과 종류가 계속 늘어나면서 클라이언트가 종류별로 문구를 직접 조립하는 방식이 점점 번거로워져서, 지형/효과 상태 객체에 `description`(카드 설명 그대로)을 저장하고 필드 상태바(`renderFieldStatus()`)와 `game:fieldCardPlayed` 로그가 이 문장을 그대로 쓰도록 단순화함(수치 필드 자체는 계산용으로 계속 존재, 표시만 description 기반으로 통일). 새 지형/효과 종류가 추가돼도 클라이언트를 더 손대지 않아도 됨
+   - 클라이언트(`main.js`): 다중 대상 카드는 필드 카드와 같은 "미리보기 후 클릭 확정" 방식(`pendingMultiTargetAttack`, 대상 지정 불필요) 재사용. 손패 카드의 코스트 표시/선택 가능 여부 판정이 전부 `effectiveCost` 기준으로 교체됨(`getDisplayCost()` 헬퍼, 서버가 안 보내는 임시 카드 객체는 `cost`로 폴백). `game:combatResult`에 `hasMoreTargets`가 참이면 전투 연출을 끄지 않고 다음 대상으로 바로 이어감(깜빡임 방지). `STATUS_BADGE_MAP`에 `damageReduction`/`costUp`/`maxAttackCostBuff` 배지 추가
+   - `Room`을 직접 참조하는 인메모리 테스트 스크립트로 28개 체크(다중 대상 큐 순환, damageReduction 데미지 차감(0 미만 방지 포함), 지형/필드효과 코스트 감면 및 costUp 합산, maxAttackCostBuff 부여·만료에 따른 resetAllCosts/toPublicView 반영, cards.json 필드) + 필드효과 데미지 보너스 3개 체크 전부 통과 확인 후 삭제. 서버 재기동 완료 — 개발자가 브라우저에서 재테스트 예정(2인은 물론, 다중 대상은 3인 이상에서 확인 권장)
+
 ### 미구현 메커닉 목록 (`card_design.md`에 카드는 이미 있지만 동작은 안 하는 것들, 우선순위 상의 필요)
-`card_design.md` 맨 아래 "정리" 섹션에 개발자가 직접 정리해준 목록입니다. 다음에 어떤 순서로 구현할지 상의해서 진행하면 됩니다.
-1. CC (턴 스킵 / 카드 사용 제한)
-2. DoT (화상 등 지속 피해)
-3. 관통 피해 (방어력 무시)
-4. 다중 대상 (전체 공격/전체 보호) — 필드 효과 카드의 "전원에게 피해"와는 별개로, **개인 카드**가 여러 명을 동시에 대상으로 하는 기능
-5. 버프/디버프 지속효과 (공격력·방어력 증감, N턴 지속)
-6. 흡혈 / 고정 HP 회복
-7. 반격 피해 (방어 성공 시 카운터)
+`card_design.md` 맨 아래 "정리" 섹션에 개발자가 직접 정리해준 목록입니다.
+1. ~~CC (턴 스킵 / 카드 사용 제한)~~ (완료, 8단계 Phase 2 — 아래 항목 참고)
+2. ~~DoT (화상 등 지속 피해)~~ (완료, 8단계 Phase 2)
+3. ~~관통 피해 (방어력 무시)~~ (완료, 8단계 Phase 1)
+4. ~~다중 대상 (전체 공격/전체 보호)~~ (완료, 8단계 Phase 3 — 위 10번 항목 참고. "전체 보호"는 팀 개념이 없어 자기 자신 대상으로 확정)
+5. ~~버프/디버프 지속효과 (공격력·방어력 증감, N턴 지속)~~ (완료, 8단계 Phase 2)
+6. ~~흡혈 / 고정 HP 회복~~ (완료, 8단계 Phase 1. 방어 성공 시 회복도 같이 구현됨)
+7. ~~반격 피해 (방어 성공 시 카운터)~~ (완료, 8단계 Phase 1)
 8. ~~지형의 "자기 속성 + 상생 대상" 동시 버프~~ (완료, 위 7단계 항목 참고)
-9. 카드 코스트 증감 (자기 속성 카드 코스트 감면 / 상대 전체 코스트 증가 / 자신 최대 코스트 증가)
+9. ~~카드 코스트 증감 (자기 속성 카드 코스트 감면 / 상대 전체 코스트 증가 / 자신 최대 코스트 증가)~~ (완료, 8단계 Phase 3)
+
+**이 목록의 9개 메커닉 전부 구현 완료됨 (2026-08-26 기준).** `card_design.md`에 설계된 70장 카드가 전부 실제로
+동작하고, "(효과 미구현)" 문구가 남은 카드는 없습니다. 다음 카드 추가/수치 조정은 `card_design.md`를 먼저 고치고
+반영을 요청하는 기존 흐름 그대로 진행하면 됩니다.
 
 ### Socket.io 이벤트 목록 (지금까지 구현된 것)
 
@@ -215,23 +251,25 @@ fieldwar/
 - `room:leave` (payload 없음)
 - `game:start` `{ roomId }`
 - `game:endTurn` `{ roomId }`
-- `game:playCard` `{ roomId, cardInstanceId, targetSocketId }` — 공격 카드 사용
+- `game:playCard` `{ roomId, cardInstanceId, targetSocketId }` — 공격 카드 사용. `targetSocketId`는 `multiTarget` 카드(예: 흙먼지폭풍)면 무시됨(서버가 생존한 상대 전원을 자동으로 대상으로 잡음, 클라이언트는 `null`로 보냄) — 8단계 Phase 3
 - `game:confirmDefense` `{ roomId, cardInstanceIds: [] }` — 방어 카드 확정 사용 (6단계에서 `game:defend`/`game:skipDefense`를 완전히 대체함, 아래 참고). 빈 배열이면 방어 포기와 동일
 - `game:playFieldCard` `{ roomId, cardInstanceId }` — 필드 카드(지형/효과) 사용, 대상 지정 없음
 
 **서버 → 클라이언트**
 - `room:created` `{ roomId }`
-- `room:updated` `{ roomId, hostSocketId, status, players[](hp/maxHp/isAlive/handCount/attackCost/maxAttackCost/defenseCost/maxDefenseCost 포함), currentTurnSocketId, pendingDefense, terrain, effects[] }`
+- `room:updated` `{ roomId, hostSocketId, status, players[](hp/maxHp/isAlive/handCount/attackCost/maxAttackCost/defenseCost/maxDefenseCost/statuses[] 포함), currentTurnSocketId, pendingDefense, terrain, effects[] }` — `statuses[]`는 8단계 Phase 2·3에서 추가된 `{ type, amount, remainingTurns }[]` (type: stun/attackLock/defenseLock/dot/attackBuff/defBuff/damageReduction/costUp/maxAttackCostBuff). `maxAttackCost`는 8단계 Phase 3부터 `maxAttackCostBuff` 반영된 실제 값. `terrain`은 `costReduction`/`description` 필드 포함(Phase 3), `effects[]`도 각각 `description` 포함
 - `game:turnChanged` `{ currentTurnSocketId }`
-- `game:handUpdated` `{ hand[] }` — 본인에게만 개별 전송 (instanceId + 카드 상세 정보: cost/element/attackPower/defensePower/synergyBonus/tickDamage/durationTurns 등, 카드 타입에 따라 해당 필드만 의미 있음)
-- `game:attackAnnounced` `{ attackerSocketId, attackerNickname, defenderSocketId, defenderNickname, cardId, cardName, cost, element, attackPower, attackTerrainBonus }` — **(6단계 신규)** 공격 카드를 냈을 때 **방 전체**에 방송(공격자/방어자뿐 아니라 구경하는 사람도 포함). 화면 중앙에 공격 카드를 띄우는 연출용
-- `game:defenseRequest` `{ attackerNickname, cardName, element, attackPower, attackTerrainBonus }` — 방어 대상에게만 개별 전송. 안내 문구용(실제 방어 카드 선택은 손패에서 직접 함)
-- `game:defenseCardApplied` `{ defenderSocketId, cardId, cardName, cost, element, defensePower, counterBonus, terrainBonus, effectiveDefensePower }` — **(6단계 신규)** 방어자가 `game:confirmDefense`로 확정한 방어 카드 한 장마다 방 전체에 방송(여러 장이면 여러 번). 공격 카드 위에 겹쳐 쌓이는 연출용
-- `game:combatResult` `{ attackerSocketId, defenderSocketId, cardId, cardName, defended, attackPower, attackTerrainBonus, appliedDefenses: [{ cardId, cardName, element, defensePower, counterBonus, terrainBonus, effectiveDefensePower }], defensePowerUsed, damageDealt, defenderHp, defenderIsAlive }` — 방 전체 방송. `appliedDefenses`는 이번 방어에 사용된 카드 전부(0장이면 빈 배열 = 무방비로 전부 피해)
-- `game:fieldCardPlayed` `{ playerSocketId, playerNickname, cardId, cardName, fieldType, element, synergyBonus, boostedElement, tickDamage, durationTurns }` — 필드 카드 사용 시 방 전체 방송. `synergyBonus`/`boostedElement`는 지형일 때만, `tickDamage`/`durationTurns`는 효과일 때만 값이 있음(나머지는 `undefined`)
-- `game:effectsTicked` `{ effects: [{ cardId, cardName, tickDamage, affectedSocketIds }] }` — 턴 전환 시 효과가 발동했을 때만 방송
+- `game:handUpdated` `{ hand[] }` — 본인에게만 개별 전송 (instanceId + 카드 상세 정보 전부 + `effectiveCost`(8단계 Phase 3 신규 — 지형/필드효과 감면·코스트증가가 반영된 실제 코스트), 카드 타입에 따라 해당 필드만 의미 있음)
+- `game:attackAnnounced` `{ attackerSocketId, attackerNickname, defenderSocketId, defenderNickname, cardId, cardName, cost, element, attackPower, attackTerrainBonus, attackEffectBonus }` — **(6단계 신규, attackEffectBonus는 8단계 Phase 3)** 공격 카드를 냈을 때 **방 전체**에 방송(공격자/방어자뿐 아니라 구경하는 사람도 포함). 화면 중앙에 공격 카드를 띄우는 연출용. 다중 대상 카드(8단계 Phase 3)는 대상마다 한 번씩 순서대로 여러 번 방송됨
+- `game:defenseRequest` `{ attackerNickname, cardName, element, attackPower, attackTerrainBonus, attackEffectBonus }` — 방어 대상에게만 개별 전송. 안내 문구용(실제 방어 카드 선택은 손패에서 직접 함)
+- `game:defenseCardApplied` `{ defenderSocketId, cardId, cardName, cost, element, defensePower, counterBonus, terrainBonus, effectiveDefensePower, counterDamage, healOnDefend }` — **(6단계 신규, 8단계 Phase 1에서 counterDamage/healOnDefend 추가)** 방어자가 `game:confirmDefense`로 확정한 방어 카드 한 장마다 방 전체에 방송(여러 장이면 여러 번). 공격 카드 위에 겹쳐 쌓이는 연출용
+- `game:combatResult` `{ attackerSocketId, defenderSocketId, cardId, cardName, defended, attackPower, attackTerrainBonus, attackEffectBonus, appliedDefenses: [{ cardId, cardName, element, defensePower, counterBonus, terrainBonus, effectiveDefensePower, counterDamage, healOnDefend }], defensePowerUsed, armorPiercing, damageDealt, damageReductionApplied, hasMoreTargets, defenderHp, defenderIsAlive, attackerHp, attackerIsAlive, healOnUse, lifestealHeal, healOnDefend, counterDamage, appliedStatuses: [{ targetSocketId, type, amount, remainingTurns }] }` — 방 전체 방송. `appliedDefenses`는 이번 방어에 사용된 카드 전부(0장이면 빈 배열 = 무방비로 전부 피해). `armorPiercing`/`healOnUse`/`lifestealHeal`/`healOnDefend`/`counterDamage`는 8단계 Phase 1, `attackerHp`/`attackerIsAlive`/`appliedStatuses`는 Phase 2, `attackEffectBonus`/`damageReductionApplied`/`hasMoreTargets`는 Phase 3에서 추가됨. `hasMoreTargets`는 다중 대상 카드가 아직 다음 대상에게 이어질 예정이면 true(클라이언트가 연출을 안 끄고 이어가는 데 씀)
+- `game:fieldCardPlayed` `{ playerSocketId, playerNickname, cardId, cardName, fieldType, element, description, durationTurns }` — 필드 카드 사용 시 방 전체 방송. 8단계 Phase 3부터 `description`(카드 설명 그대로)만 보내고 클라이언트가 그걸 그대로 로그에 표시함(기존 `synergyBonus`/`boostedElement`/`tickDamage` 개별 필드는 제거 — 지형/효과 종류가 늘어날 때마다 클라이언트 분기가 늘어나는 걸 피하기 위한 리팩터링)
+- `game:effectsTicked` `{ effects: [{ cardId, cardName, tickDamage, affectedSocketIds }] }` — 턴 전환 시 필드 효과가 발동했을 때만 방송
+- `game:statusesTicked` `{ dotTicks: [{ socketId, nickname, damage, remainingTurns }] }` — **(8단계 Phase 2 신규)** 턴 전환 시 화상(DoT) 등 개인 지속상태가 발동했을 때만 방송
+- `game:playerStunned` `{ socketId, nickname, remainingTurns }` — **(8단계 Phase 2 신규)** 기절 상태라 턴이 자동으로 건너뛰어졌을 때, 건너뛴 사람마다 방송
 - `game:over` `{ winnerSocketId, winnerNickname }`
-- `error` `{ code, message }` — 코스트 관련: `INSUFFICIENT_COST`. 방어 관련: `NOT_DEFENDER`, `CARD_NOT_FOUND`, `CARD_NOT_DEFENSE` (여러 장을 한 번에 검증하므로 하나라도 문제 있으면 전체가 거부되고 아무 것도 반영되지 않음). 필드 관련: `CARD_NOT_FIELD` (`CARD_COST_MISMATCH`는 전투 시스템 개편으로 삭제됨)
+- `error` `{ code, message }` — 코스트 관련: `INSUFFICIENT_COST`(8단계 Phase 3부터 `effectiveCost` 기준으로 계산됨). 방어 관련: `NOT_DEFENDER`, `CARD_NOT_FOUND`, `CARD_NOT_DEFENSE` (여러 장을 한 번에 검증하므로 하나라도 문제 있으면 전체가 거부되고 아무 것도 반영되지 않음). 필드 관련: `CARD_NOT_FIELD` (`CARD_COST_MISMATCH`는 전투 시스템 개편으로 삭제됨). 지속상태 관련(8단계 Phase 2 신규): `ATTACK_LOCKED`(공격봉쇄 상태에서 공격 카드 시도), `DEFENSE_LOCKED`(방어봉쇄 상태에서 방어 카드 1장 이상 제출 시도 — 0장 방어 포기는 허용됨)
 
 ### 아직 구현되지 않은 것 (다음 단계부터)
 - 잡화 카드 (카드 교환, 필드 제거/강탈 등) (미착수)
@@ -254,11 +292,15 @@ fieldwar/
 > 5. ~~필드(지형/효과) 시스템 추가~~ (완료, 2026-08-25)
 > 6. ~~프론트엔드 UI 다듬기 (레이아웃/반응형/카드 비주얼/공격·방어 연출 전면 개편)~~ (거의 완료, 2026-08-27 — 자세한 내용은 아래 "6단계 진행 상황" 참고, 남은 다듬기 항목은 우선순위 상의 필요)
 > 7. ~~카드 대량 확장 (`card_design.md` 기반, 70장)~~ (완료, 2026-08-27 — 자세한 내용은 위 "3. 기술 아키텍처 > 7번 항목" 및 "미구현 메커닉 목록" 참고)
-> 8. **다음 우선순위 상의** ← 여기부터. 유력 후보:
->    - 위 "미구현 메커닉 목록"(CC/DoT/관통/광역/버프/회복/반격/코스트증감) 중 구현 순서 정하기 — `card_design.md`에 카드는 이미 다 있어서, 순서만 정하면 바로 서버 로직 붙이면 됨
->    - 남은 UI 다듬기 항목 (6단계 항목 참고: 재접속 처리, HP 변화 애니메이션, 모바일 실기기 테스트)
->    - 카드 비주얼을 실제 이미지로 교체 (개발자가 이미지 에셋을 준비하면 진행, 위 "저장소/배포" 근처는 아니고 6단계 UI 논의에서 다룬 내용)
->    - 문서 2장 "아직 정해지지 않은 것"/"미착수 항목" 중 하나 (잡화 카드, 필드 무시 카드, 시작 HP 등 수치 밸런스)
+> 8. ~~미구현 메커닉 구현 (Phase 1~3, `card_design.md` 9개 메커닉 전부)~~ (완료, 2026-08-26 — 자세한 내용은 위 "3. 기술 아키텍처 > 8~10번 항목" 참고)
+>    - ~~Phase 1: 즉시효과(관통/흡혈/고정회복/방어성공회복/반격) 4종~~
+>    - ~~Phase 2: 지속상태 인프라 + CC/DoT/버프·디버프 3종~~
+>    - ~~Phase 3: 다중 대상 공격/보호 + 코스트 증감 (+ 뒤늦게 발견한 작열의기운 필드효과 데미지 보너스까지 포함)~~
+> 9. **다음 우선순위 상의** ← 여기부터. 유력 후보:
+>    - 남은 UI 다듬기 항목(6단계 참고: 재접속 처리, HP 변화 애니메이션, 모바일 실기기 테스트)
+>    - 카드 비주얼을 실제 이미지로 교체(개발자가 이미지 에셋을 준비하면 진행)
+>    - 문서 2장 "아직 정해지지 않은 것"/"미착수 항목"(잡화 카드, 필드 무시 카드, 시작 HP·손패 상한·덱 크기 등 수치 밸런스 — 카드 메커닉이 전부 갖춰졌으니 이제 실제 밸런싱을 시작하기 좋은 시점)
+>    - 이번에 확정한 잠정 수치들(관통 피해량, damageReduction 수치, "소폭 상승" +4 등) 실제 플레이해보고 조정
 
 ### 5단계 결과 요약 (완료됨, 참고용)
 - `Room.js`에 지형(`terrain`, 1슬롯 교체형) + 효과(`effects`, 다슬롯 누적형) 상태 추가

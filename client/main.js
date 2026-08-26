@@ -79,6 +79,11 @@ let selectedDefenseCardIds = [];
 // 기다리는 중이면 { cardInstanceId }, 아니면 null. 나만 보는 로컬 UI라서 서버 방송과는 무관함
 let pendingFieldCard = null;
 
+// 다중 대상 공격 카드(흙먼지폭풍 등)를 화면 중앙에 띄워놓고 확정을 기다리는 중이면
+// { cardInstanceId }, 아니면 null. 대상 선택이 필요 없어서 필드 카드와 같은 미리보기 방식을 씀
+// (8단계 Phase 3, 2026-08-26)
+let pendingMultiTargetAttack = null;
+
 // 지금 combatOverlay에 겹쳐서 보여주고 있는 카드들 (공격 카드 1장 + 방어 카드 0장 이상).
 // game:attackAnnounced로 시작되고, 방어 카드가 추가될 때마다 늘어나다가, game:combatResult가
 // 오면 전부 한꺼번에 지워집니다. (2026-08-27 추가)
@@ -98,6 +103,15 @@ const TYPE_CLASS_MAP = {
   effect: "card-effect",
 };
 
+// 카드 타입 -> 좌상단 작은 아이콘 (속성 아이콘과는 별개로, "이 카드가 공격/방어/지형/효과 중 무엇인지"를
+// 한눈에 보여줌 - 2026-08-29 카드 디자인 개편, 스케치 기준)
+const TYPE_ICON_MAP = {
+  attack: "⚔️",
+  defense: "🛡️",
+  terrain: "🗺️",
+  effect: "⚡",
+};
+
 // 지형 속성 -> 배경 테마 (실제 이미지 파일은 없어서 그라디언트로 분위기만 표현)
 const ELEMENT_BACKGROUNDS = {
   목: "radial-gradient(circle at 50% 15%, #234d20, #1b1b2f 70%)",
@@ -115,8 +129,17 @@ function applyTerrainBackground() {
     : DEFAULT_BACKGROUND;
 }
 
+// 지형 감면/필드효과 감면/코스트증가가 반영된 실제 코스트. 전투 연출용으로 서버가 만들어 보내는
+// 임시 카드 객체(공격 카드 announce, 방어 카드 stack 등)에는 effectiveCost가 없을 수 있어서
+// 그때는 그냥 cost를 그대로 씀 (8단계 Phase 3, 2026-08-26)
+function getDisplayCost(card) {
+  return card.effectiveCost !== undefined ? card.effectiveCost : card.cost;
+}
+
 // 카드 한 장의 "실물 카드처럼 보이는" 내부 마크업을 만듦 (손패/시전 연출 공용).
-// 우상단 코스트 배지 + 상단 제목바 + 가운데 큰 속성 아이콘 + 하단 속성/수치 정보로 구성
+// 개발자가 준 스케치 기준(2026-08-29 개편): 상단 줄(타입 아이콘/이름/코스트) - 이미지 영역(속성 아이콘으로
+// 대신함) - 설명(효과) 영역 - 하단 줄(속성/수치). 전투 연출에서 서버가 만들어 보내는 임시 카드 객체는
+// description이 없을 수 있어서 그 경우 빈 칸으로 둠
 function buildCardFaceHtml(card) {
   let statLabel;
   if (card.type === "attack") {
@@ -130,10 +153,14 @@ function buildCardFaceHtml(card) {
   }
 
   return `
-    <div class="card-cost-badge">${card.cost}</div>
-    <div class="card-name">${card.name}</div>
-    <div class="card-icon-area">${elementIcon(card.element)}</div>
-    <div class="card-footer">
+    <div class="card-top-row">
+      <div class="card-type-icon">${TYPE_ICON_MAP[card.type] || ""}</div>
+      <div class="card-name">${card.name}</div>
+      <div class="card-cost-badge">${getDisplayCost(card)}</div>
+    </div>
+    <div class="card-image-area">${elementIcon(card.element)}</div>
+    <div class="card-desc-area">${card.description || ""}</div>
+    <div class="card-bottom-row">
       <span class="card-element">${card.element}속성</span>
       <span class="card-stat">${statLabel}</span>
     </div>
@@ -143,16 +170,17 @@ function buildCardFaceHtml(card) {
 // 카드 얼굴에는 다 못 담는 상세 설명. 버튼의 title 속성으로 넣어두면 마우스를 올렸을 때
 // 브라우저 기본 툴팁으로 보여줌 (카드 디자인을 안 건드리고 정보를 보완하는 용도)
 function buildCardTitleText(card) {
+  const cost = getDisplayCost(card);
   if (card.type === "attack") {
-    return `${card.name} · 공격력 ${card.attackPower} · ${card.element}속성 · 코스트 ${card.cost}`;
+    return `${card.name} · 공격력 ${card.attackPower} · ${card.element}속성 · 코스트 ${cost}`;
   }
   if (card.type === "defense") {
-    return `${card.name} · 방어력 ${card.defensePower} · ${card.element}속성 · 코스트 ${card.cost}`;
+    return `${card.name} · 방어력 ${card.defensePower} · ${card.element}속성 · 코스트 ${cost}`;
   }
   if (card.type === "terrain") {
-    return `${card.name} · ${card.element}속성 및 상생 대상 속성 카드 위력 +${card.synergyBonus} · 코스트 ${card.cost}`;
+    return `${card.name} · ${card.element}속성 및 상생 대상 속성 카드 위력 +${card.synergyBonus} · 코스트 ${cost}`;
   }
-  return `${card.name} · ${card.durationTurns}턴 동안 매턴 ${card.tickDamage}의 피해 · 코스트 ${card.cost}`;
+  return `${card.name} · ${card.durationTurns}턴 동안 매턴 ${card.tickDamage}의 피해 · 코스트 ${cost}`;
 }
 
 // ---- 방 만들기 버튼 ----
@@ -356,13 +384,47 @@ function cancelFieldCardPreview() {
   castOverlay.classList.add("hidden");
 }
 
+// ---- 다중 대상 공격 카드 미리보기 (필드 카드와 같은 패턴) ----
+// 대상을 정할 필요가 없으니 클릭 한 번으로 미리보기, 한 번 더 클릭하면 서버에 targetSocketId 없이
+// 보냄(서버가 생존한 상대 전원을 알아서 대상으로 잡음) - 8단계 Phase 3, 2026-08-26
+function previewMultiTargetCard(card) {
+  pendingMultiTargetAttack = { cardInstanceId: card.instanceId };
+  castCard.innerHTML = `
+    <div class="card-btn ${TYPE_CLASS_MAP[card.type]}">${buildCardFaceHtml(card)}</div>
+    <div class="preview-hint">전체 대상 공격 · 클릭하면 사용 · 바깥을 클릭하면 취소</div>
+  `;
+  castOverlay.classList.remove("hidden");
+}
+
+function confirmMultiTargetAttack() {
+  if (!pendingMultiTargetAttack) return;
+  const { cardInstanceId } = pendingMultiTargetAttack;
+  pendingMultiTargetAttack = null;
+  castOverlay.classList.add("hidden");
+  socket.emit("game:playCard", { roomId: currentRoomId, cardInstanceId, targetSocketId: null });
+}
+
+function cancelMultiTargetAttack() {
+  pendingMultiTargetAttack = null;
+  castOverlay.classList.add("hidden");
+}
+
 // 클릭한 지점이 카드(.card-btn) 안이면 확정, 그 외(안내 문구·배경 등 카드가 아닌 모든 곳)는 취소
 castOverlay.addEventListener("click", (e) => {
-  if (!pendingFieldCard) return;
-  if (e.target.closest(".card-btn")) {
-    confirmFieldCardPreview();
-  } else {
-    cancelFieldCardPreview();
+  if (pendingFieldCard) {
+    if (e.target.closest(".card-btn")) {
+      confirmFieldCardPreview();
+    } else {
+      cancelFieldCardPreview();
+    }
+    return;
+  }
+  if (pendingMultiTargetAttack) {
+    if (e.target.closest(".card-btn")) {
+      confirmMultiTargetAttack();
+    } else {
+      cancelMultiTargetAttack();
+    }
   }
 });
 
@@ -437,12 +499,40 @@ function clearCombatStackWithDelay() {
   }, 500); // 결과를 잠깐 보여주는 시간
 }
 
+// 지속상태(기절/봉쇄/화상/버프) 타입별 아이콘+라벨 (8단계 Phase 2, 2026-08-26)
+const STATUS_BADGE_MAP = {
+  stun: { icon: "🌀", label: "기절" },
+  attackLock: { icon: "🚫", label: "공격봉쇄" },
+  defenseLock: { icon: "🛡️🚫", label: "방어봉쇄" },
+  dot: { icon: "🔥", label: "화상" },
+  attackBuff: { icon: "⚔️", label: "공격력" },
+  defBuff: { icon: "🛡️", label: "방어력" },
+  // 8단계 Phase 3, 2026-08-26
+  damageReduction: { icon: "🧱", label: "피해감소" },
+  costUp: { icon: "💸", label: "코스트+" },
+  maxAttackCostBuff: { icon: "🔋", label: "최대코스트+" },
+};
+
+// p.statuses를 작은 배지 목록으로 렌더링 (없으면 빈 문자열)
+function buildStatusBadgesHtml(statuses) {
+  if (!statuses || statuses.length === 0) return "";
+  const badges = statuses
+    .map((s) => {
+      const info = STATUS_BADGE_MAP[s.type] || { icon: "❔", label: s.type };
+      const amountText = s.amount > 0 ? ` +${s.amount}` : "";
+      return `<span class="status-badge">${info.icon} ${info.label}${amountText} (${s.remainingTurns}턴)</span>`;
+    })
+    .join("");
+  return `<div class="status-badges">${badges}</div>`;
+}
+
 // HP바 + 코스트 점(pip) 마크업을 만듦 (내 상태 카드/상대 상태 카드에서 공용으로 씀)
 function buildStatusCardInnerHtml(p) {
   const hpPercent = Math.max(0, Math.round((p.hp / p.maxHp) * 100));
   return `
     <div class="status-hp-bar"><div class="status-hp-fill" style="width:${hpPercent}%"></div></div>
     <div class="status-hp-text">HP ${p.hp} / ${p.maxHp} · 카드 ${p.handCount}장</div>
+    ${buildStatusBadgesHtml(p.statuses)}
     <div class="cost-pips">
       <div class="cost-group cost-attack">${buildPips(p.attackCost, p.maxAttackCost)}</div>
       <div class="cost-group cost-defense">${buildPips(p.defenseCost, p.maxDefenseCost)}</div>
@@ -525,15 +615,14 @@ function renderOpponents() {
 }
 
 // 좌상단의 "지형 카드"/"필드 카드" 박스를 현재 필드 상태로 채움.
-// 무슨 효과인지(어떤 속성을 강화하는지, 얼마나 피해를 주는지)까지 바로 보이게 함
+// 카드 설명(description)을 그대로 보여주는 방식으로 통일 (8단계 Phase 3, 2026-08-26) - 지형/효과
+// 종류가 계속 늘어나서 종류별로 문구를 여기서 직접 조립하면 계속 branching이 늘어나는 걸 피하기 위함
 function renderFieldStatus() {
   if (latestTerrain) {
     terrainSlot.className = "field-slot-card terrain-slot";
     terrainSlot.innerHTML = `
       <div class="field-slot-title">🗺️ ${latestTerrain.cardName}</div>
-      <div>${elementIcon(latestTerrain.element)}${latestTerrain.element} · ${elementIcon(
-      latestTerrain.boostedElement
-    )}${latestTerrain.boostedElement} 카드 +${latestTerrain.synergyBonus}</div>
+      <div>${elementIcon(latestTerrain.element)}${latestTerrain.element}속성 · ${escapeHtml(latestTerrain.description)}</div>
     `;
   } else {
     terrainSlot.className = "field-slot-card terrain-slot empty";
@@ -548,7 +637,7 @@ function renderFieldStatus() {
     effectsSlot.innerHTML = latestEffects
       .map(
         (e) =>
-          `<div class="effect-item">⚡ ${e.cardName} (매턴 ${e.tickDamage} 피해, ${e.remainingTurns}턴 남음)</div>`
+          `<div class="effect-item">⚡ ${e.cardName}: ${escapeHtml(e.description)} (${e.remainingTurns}턴 남음)</div>`
       )
       .join("");
   }
@@ -570,9 +659,10 @@ function renderHand() {
   const myDefenseCost = me ? me.defenseCost : 0;
 
   // 지금까지 선택해둔 방어 카드들의 코스트 합계 (새 카드를 선택 가능한지 판단할 때 씀)
+  // effectiveCost 기준(8단계 Phase 3, 2026-08-26) - 지형/필드효과 감면·코스트증가가 반영된 값
   const selectedDefenseCost = selectedDefenseCardIds.reduce((sum, id) => {
     const c = myHand.find((h) => h.instanceId === id);
-    return sum + (c ? c.cost : 0);
+    return sum + (c ? getDisplayCost(c) : 0);
   }, 0);
 
   const total = myHand.length;
@@ -604,13 +694,13 @@ function renderHand() {
       } else {
         // 아직 선택 안 한 카드는, 지금까지 선택해둔 것들의 코스트 합계에 이 카드를 더해도
         // 방어 코스트 안에 들어오는지로 판단 (실제 소모는 "사용"을 눌러야 서버에 반영됨)
-        affordable = selectedDefenseCost + card.cost <= myDefenseCost;
+        affordable = selectedDefenseCost + getDisplayCost(card) <= myDefenseCost;
       }
       isDefendable = card.type === "defense" && affordable && !isSelectedForDefense;
     } else {
       // 평소에는 공격/효과 카드가 공격 코스트 기준으로 판단 (지형 카드는 코스트 0이라 항상 가능,
       // 방어 카드는 평소엔 낼 일이 없어서 그냥 항상 "가능"으로 둠 - 클릭해도 동작이 없을 뿐)
-      affordable = card.type === "defense" || card.cost <= myAttackCost;
+      affordable = card.type === "defense" || getDisplayCost(card) <= myAttackCost;
     }
 
     const showSelected = isDefending ? isSelectedForDefense : isSelected;
@@ -625,7 +715,7 @@ function renderHand() {
     btn.innerHTML = buildCardFaceHtml(card);
 
     btn.addEventListener("click", () => {
-      if (pendingFieldCard) return; // 필드 카드 미리보기 중에는 항상 막음
+      if (pendingFieldCard || pendingMultiTargetAttack) return; // 카드 미리보기 중에는 항상 막음
       // 전투 연출이 진행 중이면 새로 카드를 고르는 건 막되, 지금 방어해야 하는 본인은 예외
       // (isCasting은 attackAnnounced~combatResult 동안 전원에게 true라서, 이 예외가 없으면
       //  정작 방어 카드를 내야 하는 사람도 손패를 못 누르게 되어버림)
@@ -643,6 +733,13 @@ function renderHand() {
           previewLocalDefenseCard(card);
         }
         renderHand();
+        return;
+      }
+
+      if (card.type === "attack" && card.multiTarget) {
+        // 다중 대상 카드는 대상 선택이 필요 없으니 필드 카드처럼 미리보기 후 확정하는 방식으로 사용
+        // (8단계 Phase 3, 2026-08-26)
+        previewMultiTargetCard(card);
         return;
       }
 
@@ -686,9 +783,13 @@ socket.on("game:defenseCardApplied", (data) => {
 // ---- 서버가 "너에게 공격이 들어왔다, 방어할지 정해라"라고 알려줄 때 ----
 // 실제로 얼마나 막아낼지(방어력 vs 공격력, 상극 보너스 포함)는 서버가 최종 계산하므로
 // 여기서는 안내 배너만 띄우고, 방어 카드 선택은 아래 손패(부채꼴)에서 직접 받습니다.
-socket.on("game:defenseRequest", ({ attackerNickname, cardName, element, attackPower, attackTerrainBonus }) => {
-  const bonusHtml =
-    attackTerrainBonus > 0 ? ` <span class="bonus-text">(지형 보너스 +${attackTerrainBonus} 포함)</span>` : "";
+socket.on(
+  "game:defenseRequest",
+  ({ attackerNickname, cardName, element, attackPower, attackTerrainBonus, attackEffectBonus }) => {
+  const bonusParts = [];
+  if (attackTerrainBonus > 0) bonusParts.push(`지형 보너스 +${attackTerrainBonus}`);
+  if (attackEffectBonus > 0) bonusParts.push(`필드효과 보너스 +${attackEffectBonus}`);
+  const bonusHtml = bonusParts.length > 0 ? ` <span class="bonus-text">(${bonusParts.join(", ")} 포함)</span>` : "";
   defenseInfo.innerHTML = `${escapeHtml(attackerNickname)}님이 "${escapeHtml(
     cardName
   )}"(${element}속성, 공격력 ${attackPower})${bonusHtml}(으)로 공격했습니다! 아래 손패에서 방어 카드를 고른 뒤 "사용"을 누르세요.`;
@@ -739,18 +840,30 @@ socket.on(
     defended,
     attackPower,
     attackTerrainBonus,
+    attackEffectBonus,
     appliedDefenses,
     defensePowerUsed,
+    armorPiercing,
     damageDealt,
     defenderHp,
+    healOnUse,
+    lifestealHeal,
+    healOnDefend,
+    counterDamage,
+    appliedStatuses,
+    damageReductionApplied,
+    hasMoreTargets,
   }) => {
     const attackerName = escapeHtml(getNicknameOf(attackerSocketId));
     const defenderName = escapeHtml(getNicknameOf(defenderSocketId));
     const safeCardName = escapeHtml(cardName);
 
-    // 지형 보너스가 붙었으면 강조색 글씨(<span class="bonus-text">)로 덧붙여서 보여줌
+    // 지형/필드효과 보너스가 붙었으면 강조색 글씨(<span class="bonus-text">)로 덧붙여서 보여줌
+    const attackBonusParts = [];
+    if (attackTerrainBonus > 0) attackBonusParts.push(`지형 +${attackTerrainBonus}`);
+    if (attackEffectBonus > 0) attackBonusParts.push(`필드효과 +${attackEffectBonus}`);
     const attackBonusHtml =
-      attackTerrainBonus > 0 ? ` <span class="bonus-text">(지형 +${attackTerrainBonus})</span>` : "";
+      attackBonusParts.length > 0 ? ` <span class="bonus-text">(${attackBonusParts.join(", ")})</span>` : "";
     const defenseSummaryHtml = defended ? buildDefenseSummaryHtml(appliedDefenses) : "";
 
     const line = document.createElement("p");
@@ -761,6 +874,38 @@ socket.on(
     } else {
       line.innerHTML = `${attackerName}의 "${safeCardName}"(공격력 ${attackPower}${attackBonusHtml}) 공격! ${defenderName}님이 ${defenseSummaryHtml} = 방어력 ${defensePowerUsed}로 막았지만 ${damageDealt}의 피해를 입었습니다. (남은 HP: ${defenderHp})`;
     }
+
+    // 8단계 Phase 1(2026-08-26): 관통/흡혈/고정회복/방어회복/반격 같은 즉시효과를 강조색으로 덧붙여 보여줌
+    const extraParts = [];
+    if (armorPiercing > 0) extraParts.push(`관통 피해 ${armorPiercing} 추가`);
+    if (lifestealHeal > 0) extraParts.push(`${attackerName}이(가) 흡혈로 HP ${lifestealHeal} 회복`);
+    if (healOnUse > 0) extraParts.push(`${attackerName}이(가) 카드 효과로 HP ${healOnUse} 회복`);
+    if (healOnDefend > 0) extraParts.push(`${defenderName}이(가) 방어 효과로 HP ${healOnDefend} 회복`);
+    if (counterDamage > 0) extraParts.push(`${attackerName}이(가) 반격 피해 ${counterDamage} 입음`);
+    // 8단계 Phase 3(2026-08-26): 받는 피해 감소(대지의보호막/대지의성채 등)
+    if (damageReductionApplied > 0) extraParts.push(`${defenderName}의 피해 감소 효과로 ${damageReductionApplied} 경감`);
+
+    // 8단계 Phase 2(2026-08-26): CC/화상/버프 부여 문구도 이어붙임
+    (appliedStatuses || []).forEach((s) => {
+      const targetName = s.targetSocketId === attackerSocketId ? attackerName : defenderName;
+      const info = STATUS_BADGE_MAP[s.type] || { label: s.type };
+      if (s.type === "dot") {
+        extraParts.push(`${targetName}에게 ${info.label}(매턴 ${s.amount}, ${s.remainingTurns}턴) 부여`);
+      } else if (s.type === "attackBuff" || s.type === "defBuff" || s.type === "maxAttackCostBuff") {
+        extraParts.push(`${targetName}의 ${info.label}이(가) ${s.remainingTurns}턴간 +${s.amount} 상승`);
+      } else if (s.type === "damageReduction") {
+        extraParts.push(`${targetName}이(가) ${s.remainingTurns}턴간 받는 피해 ${s.amount} 감소 효과 획득`);
+      } else if (s.type === "costUp") {
+        extraParts.push(`${targetName}의 카드 코스트가 ${s.remainingTurns}턴간 +${s.amount} 증가`);
+      } else {
+        extraParts.push(`${targetName}에게 ${info.label} ${s.remainingTurns}턴 부여`);
+      }
+    });
+
+    if (extraParts.length > 0) {
+      line.innerHTML += ` <span class="bonus-text">(${extraParts.join(", ")})</span>`;
+    }
+
     combatLog.prepend(line);
 
     // 방어자 카드에 피격(빨강+흔들림) 또는 완전방어(초록빛) 애니메이션을 잠깐 재생
@@ -776,11 +921,31 @@ socket.on(
       renderHand();
     }
 
-    // 전원의 화면에서 공통으로 진행 중이던 전투 연출을 종료
-    isCasting = false;
-    clearCombatStackWithDelay();
+    // 다중 대상 카드(흙먼지폭풍 등)가 아직 다음 대상에게 이어질 예정이면, 연출을 끄지 않고 이어감
+    // (곧바로 game:attackAnnounced가 다시 와서 카드 내용을 새로 채워줌 - 8단계 Phase 3, 2026-08-26)
+    if (!hasMoreTargets) {
+      // 전원의 화면에서 공통으로 진행 중이던 전투 연출을 종료
+      isCasting = false;
+      clearCombatStackWithDelay();
+    }
   }
 );
+
+// ---- 누군가 기절 상태라 턴을 자동으로 건너뛸 때 (8단계 Phase 2, 2026-08-26) ----
+socket.on("game:playerStunned", ({ nickname, remainingTurns }) => {
+  const line = document.createElement("p");
+  line.innerHTML = `${escapeHtml(nickname)}님은 기절 상태라 턴을 건너뜁니다. <span class="bonus-text">(남은 기절 ${remainingTurns}턴)</span>`;
+  combatLog.prepend(line);
+});
+
+// ---- 화상(DoT) 등 개인 지속상태가 턴 전환 시 발동할 때 (8단계 Phase 2, 2026-08-26) ----
+socket.on("game:statusesTicked", ({ dotTicks }) => {
+  dotTicks.forEach((t) => {
+    const line = document.createElement("p");
+    line.innerHTML = `${escapeHtml(t.nickname)}님이 화상 피해 ${t.damage}를 입었습니다. <span class="bonus-text">(남은 ${t.remainingTurns}턴)</span>`;
+    combatLog.prepend(line);
+  });
+});
 
 // ==================== 필드 (지형 / 효과) ====================
 
@@ -788,16 +953,14 @@ socket.on(
 // 무슨 효과인지(어떤 속성을 강화하는지 / 얼마나 몇 턴간 피해를 주는지)까지 강조색으로 같이 보여줌
 socket.on(
   "game:fieldCardPlayed",
-  ({ playerNickname, cardName, fieldType, element, synergyBonus, boostedElement, tickDamage, durationTurns }) => {
+  // description을 그대로 보여주는 방식으로 단순화 (8단계 Phase 3, 2026-08-26) - renderFieldStatus()와 같은 이유
+  ({ playerNickname, cardName, fieldType, description }) => {
     const safeNickname = escapeHtml(playerNickname);
     const safeCardName = escapeHtml(cardName);
+    const typeLabel = fieldType === "terrain" ? "지형" : "효과";
 
     const line = document.createElement("p");
-    if (fieldType === "terrain") {
-      line.innerHTML = `${safeNickname}님이 지형 카드 "${safeCardName}"을(를) 설치했습니다. <span class="bonus-text">(${element}속성 · ${boostedElement}속성 카드 +${synergyBonus})</span>`;
-    } else {
-      line.innerHTML = `${safeNickname}님이 효과 카드 "${safeCardName}"을(를) 사용했습니다. <span class="bonus-text">(${durationTurns}턴 동안 매턴 ${tickDamage} 피해)</span>`;
-    }
+    line.innerHTML = `${safeNickname}님이 ${typeLabel} 카드 "${safeCardName}"을(를) 사용했습니다. <span class="bonus-text">${escapeHtml(description)}</span>`;
     combatLog.prepend(line);
   }
 );

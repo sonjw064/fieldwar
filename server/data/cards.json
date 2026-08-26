@@ -17,7 +17,9 @@
     "cost": 1,
     "attackPower": 7,
     "defensePower": 0,
-    "description": "상대는 다음 턴 방어 카드를 사용할 수 없다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "ccEffect": "defenseLock",
+    "ccDuration": 1,
+    "description": "공격력 7로 피해를 입히고, 상대는 1턴 동안 방어 카드를 사용할 수 없다."
   },
   {
     "id": "atk_wood_3",
@@ -37,7 +39,9 @@
     "cost": 2,
     "attackPower": 11,
     "defensePower": 0,
-    "description": "상대는 1턴 동안 행동할 수 없다(기절) (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "ccEffect": "stun",
+    "ccDuration": 1,
+    "description": "공격력 11로 피해를 입히고, 상대는 1턴 동안 행동할 수 없다(기절)."
   },
   {
     "id": "atk_wood_5",
@@ -47,7 +51,9 @@
     "cost": 3,
     "attackPower": 16,
     "defensePower": 0,
-    "description": "상대는 2턴 동안 행동할 수 없다(기절) (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "ccEffect": "stun",
+    "ccDuration": 2,
+    "description": "공격력 16으로 피해를 입히고, 상대는 2턴 동안 행동할 수 없다(기절)."
   },
   {
     "id": "atk_fire_1",
@@ -67,7 +73,9 @@
     "cost": 1,
     "attackPower": 8,
     "defensePower": 0,
-    "description": "3턴 동안 매턴 화상 피해 2를 추가로 입힌다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "dotDamage": 2,
+    "dotDuration": 3,
+    "description": "공격력 8로 피해를 입히고, 3턴 동안 매턴 화상 피해 2를 추가로 입힌다."
   },
   {
     "id": "atk_fire_3",
@@ -87,7 +95,8 @@
     "cost": 2,
     "attackPower": 12,
     "defensePower": 0,
-    "description": "방어력을 무시하고 고정 피해 5를 추가로 입힌다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "armorPiercing": 5,
+    "description": "공격력 12로 피해를 입히고, 방어력을 무시하는 고정 피해 5를 추가로 입힌다."
   },
   {
     "id": "atk_fire_5",
@@ -97,7 +106,9 @@
     "cost": 3,
     "attackPower": 20,
     "defensePower": 0,
-    "description": "3턴 동안 매턴 화상 피해 4를 추가로 입힌다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "dotDamage": 4,
+    "dotDuration": 3,
+    "description": "공격력 20으로 피해를 입히고, 3턴 동안 매턴 화상 피해 4를 추가로 입힌다."
   },
   {
     "id": "atk_earth_1",
@@ -117,7 +128,8 @@
     "cost": 1,
     "attackPower": 6,
     "defensePower": 0,
-    "description": "상대 전원에게 피해를 입힌다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "multiTarget": true,
+    "description": "생존한 상대 전원에게 각각 공격력 6의 피해를 입힌다."
   },
   {
     "id": "atk_earth_3",
@@ -137,7 +149,8 @@
     "cost": 2,
     "attackPower": 11,
     "defensePower": 0,
-    "description": "상대 전원에게 피해를 입힌다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "multiTarget": true,
+    "description": "생존한 상대 전원에게 각각 공격력 11의 피해를 입힌다."
   },
   {
     "id": "atk_earth_5",
@@ -147,7 +160,9 @@
     "cost": 3,
     "attackPower": 18,
     "defensePower": 0,
-    "description": "상대 전원에게 강한 피해를 입히며 방어력을 일부 무시한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "multiTarget": true,
+    "armorPiercing": 8,
+    "description": "생존한 상대 전원에게 각각 공격력 18의 피해를 입히고, 방어력을 무시하는 고정 피해 8을 추가로 입힌다."
   },
   {
     "id": "atk_metal_1",
@@ -167,7 +182,9 @@
     "cost": 1,
     "attackPower": 7,
     "defensePower": 0,
-    "description": "다음 턴 자신의 공격력이 5 증가한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "attackBuffAmount": 5,
+    "attackBuffDuration": 1,
+    "description": "공격력 7로 피해를 입히고, 다음 턴 자신의 공격력이 5 증가한다."
   },
   {
     "id": "atk_metal_3",
@@ -187,7 +204,11 @@
     "cost": 2,
     "attackPower": 11,
     "defensePower": 0,
-    "description": "2턴 동안 자신의 공격력·방어력이 소폭 상승한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "attackBuffAmount": 4,
+    "attackBuffDuration": 2,
+    "defBuffAmount": 4,
+    "defBuffDuration": 2,
+    "description": "공격력 11로 피해를 입히고, 2턴 동안 자신의 공격력·방어력이 각각 4 상승한다."
   },
   {
     "id": "atk_metal_5",
@@ -197,7 +218,9 @@
     "cost": 3,
     "attackPower": 18,
     "defensePower": 0,
-    "description": "3턴 동안 자신의 공격력이 8 증가한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "attackBuffAmount": 8,
+    "attackBuffDuration": 3,
+    "description": "공격력 18로 피해를 입히고, 3턴 동안 자신의 공격력이 8 증가한다."
   },
   {
     "id": "atk_water_1",
@@ -217,7 +240,8 @@
     "cost": 1,
     "attackPower": 7,
     "defensePower": 0,
-    "description": "가한 피해의 50%만큼 자신의 HP를 회복한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "lifestealPercent": 50,
+    "description": "공격력 7로 피해를 입히고, 실제로 들어간 피해의 50%만큼 자신의 HP를 회복한다."
   },
   {
     "id": "atk_water_3",
@@ -237,7 +261,8 @@
     "cost": 2,
     "attackPower": 9,
     "defensePower": 0,
-    "description": "자신의 HP를 6 회복한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "healOnUse": 6,
+    "description": "공격력 9로 피해를 입히고, 자신의 HP를 6 회복한다."
   },
   {
     "id": "atk_water_5",
@@ -247,7 +272,8 @@
     "cost": 3,
     "attackPower": 18,
     "defensePower": 0,
-    "description": "자신의 HP를 10 회복한다 (효과 미구현 - 현재는 공격력 수치만 적용됨)"
+    "healOnUse": 10,
+    "description": "공격력 18로 피해를 입히고, 자신의 HP를 10 회복한다."
   },
   {
     "id": "def_wood_1",
@@ -267,7 +293,9 @@
     "cost": 1,
     "attackPower": 0,
     "defensePower": 5,
-    "description": "방어에 성공하면 상대는 다음 공격 카드를 사용할 수 없다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "ccEffect": "attackLock",
+    "ccDuration": 1,
+    "description": "방어력 5로 막아내고, 상대는 1턴 동안 공격 카드를 사용할 수 없다."
   },
   {
     "id": "def_wood_3",
@@ -287,7 +315,9 @@
     "cost": 2,
     "attackPower": 0,
     "defensePower": 11,
-    "description": "방어에 성공하면 상대는 1턴 동안 행동할 수 없다(기절) (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "ccEffect": "stun",
+    "ccDuration": 1,
+    "description": "방어력 11로 막아내고, 상대는 1턴 동안 행동할 수 없다(기절)."
   },
   {
     "id": "def_wood_5",
@@ -297,7 +327,9 @@
     "cost": 3,
     "attackPower": 0,
     "defensePower": 16,
-    "description": "방어에 성공하면 상대는 2턴 동안 행동할 수 없다(기절) (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "ccEffect": "stun",
+    "ccDuration": 2,
+    "description": "방어력 16으로 막아내고, 상대는 2턴 동안 행동할 수 없다(기절)."
   },
   {
     "id": "def_fire_1",
@@ -317,7 +349,8 @@
     "cost": 1,
     "attackPower": 0,
     "defensePower": 6,
-    "description": "방어에 성공하면 상대에게 반격 피해 5를 입힌다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "counterDamage": 5,
+    "description": "방어력 6으로 막아내고, 상대에게 반격 피해 5를 입힌다."
   },
   {
     "id": "def_fire_3",
@@ -337,7 +370,8 @@
     "cost": 2,
     "attackPower": 0,
     "defensePower": 11,
-    "description": "방어에 성공하면 상대에게 반격 피해 8을 입힌다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "counterDamage": 8,
+    "description": "방어력 11로 막아내고, 상대에게 반격 피해 8을 입힌다."
   },
   {
     "id": "def_fire_5",
@@ -347,7 +381,8 @@
     "cost": 3,
     "attackPower": 0,
     "defensePower": 16,
-    "description": "방어에 성공하면 상대에게 반격 피해 12를 입힌다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "counterDamage": 12,
+    "description": "방어력 16으로 막아내고, 상대에게 반격 피해 12를 입힌다."
   },
   {
     "id": "def_earth_1",
@@ -367,7 +402,9 @@
     "cost": 1,
     "attackPower": 0,
     "defensePower": 5,
-    "description": "방어에 성공하면 아군 전체가 1턴 동안 받는 피해가 소폭 감소한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "damageReductionAmount": 3,
+    "damageReductionDuration": 1,
+    "description": "방어력 5로 막아내고, 1턴 동안 자신이 받는 피해가 3 감소한다."
   },
   {
     "id": "def_earth_3",
@@ -387,7 +424,9 @@
     "cost": 2,
     "attackPower": 0,
     "defensePower": 11,
-    "description": "방어에 성공하면 아군 전체의 방어력이 1턴 동안 증가한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "defBuffAmount": 8,
+    "defBuffDuration": 1,
+    "description": "방어력 11로 막아내고, 1턴 동안 자신의 방어력이 8 증가한다."
   },
   {
     "id": "def_earth_5",
@@ -397,7 +436,9 @@
     "cost": 3,
     "attackPower": 0,
     "defensePower": 16,
-    "description": "방어에 성공하면 아군 전체가 2턴 동안 받는 피해가 감소한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "damageReductionAmount": 5,
+    "damageReductionDuration": 2,
+    "description": "방어력 16으로 막아내고, 2턴 동안 자신이 받는 피해가 5 감소한다."
   },
   {
     "id": "def_metal_1",
@@ -417,7 +458,9 @@
     "cost": 1,
     "attackPower": 0,
     "defensePower": 5,
-    "description": "방어에 성공하면 다음 턴 자신의 공격력이 5 증가한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "attackBuffAmount": 5,
+    "attackBuffDuration": 1,
+    "description": "방어력 5로 막아내고, 다음 턴 자신의 공격력이 5 증가한다."
   },
   {
     "id": "def_metal_3",
@@ -437,7 +480,11 @@
     "cost": 2,
     "attackPower": 0,
     "defensePower": 11,
-    "description": "방어에 성공하면 2턴 동안 자신의 공격력·방어력이 상승한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "attackBuffAmount": 4,
+    "attackBuffDuration": 2,
+    "defBuffAmount": 4,
+    "defBuffDuration": 2,
+    "description": "방어력 11로 막아내고, 2턴 동안 자신의 공격력·방어력이 각각 4 상승한다."
   },
   {
     "id": "def_metal_5",
@@ -447,7 +494,9 @@
     "cost": 3,
     "attackPower": 0,
     "defensePower": 16,
-    "description": "방어에 성공하면 3턴 동안 자신의 공격력이 8 증가한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "attackBuffAmount": 8,
+    "attackBuffDuration": 3,
+    "description": "방어력 16으로 막아내고, 3턴 동안 자신의 공격력이 8 증가한다."
   },
   {
     "id": "def_water_1",
@@ -467,7 +516,8 @@
     "cost": 1,
     "attackPower": 0,
     "defensePower": 5,
-    "description": "방어에 성공하면 HP를 4 회복한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "healOnDefend": 4,
+    "description": "방어력 5로 막아내고, HP를 4 회복한다."
   },
   {
     "id": "def_water_3",
@@ -487,7 +537,8 @@
     "cost": 2,
     "attackPower": 0,
     "defensePower": 11,
-    "description": "방어에 성공하면 HP를 8 회복한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "healOnDefend": 8,
+    "description": "방어력 11로 막아내고, HP를 8 회복한다."
   },
   {
     "id": "def_water_5",
@@ -497,7 +548,8 @@
     "cost": 3,
     "attackPower": 0,
     "defensePower": 16,
-    "description": "방어에 성공하면 HP를 12 회복한다 (효과 미구현 - 현재는 방어력 수치만 적용됨)"
+    "healOnDefend": 12,
+    "description": "방어력 16으로 막아내고, HP를 12 회복한다."
   },
   {
     "id": "terrain_wood_1",
@@ -519,7 +571,8 @@
     "attackPower": 0,
     "defensePower": 0,
     "synergyBonus": 0,
-    "description": "목속성 카드의 코스트가 1 감소한다 (효과 미구현 - 현재는 지형 교체만 적용됨)"
+    "costReduction": 1,
+    "description": "필드에 이슬맺힌안개숲을(를) 깐다. 목속성 카드의 코스트가 1 감소한다."
   },
   {
     "id": "terrain_fire_1",
@@ -541,7 +594,8 @@
     "attackPower": 0,
     "defensePower": 0,
     "synergyBonus": 0,
-    "description": "화속성 카드의 코스트가 1 감소한다 (효과 미구현 - 현재는 지형 교체만 적용됨)"
+    "costReduction": 1,
+    "description": "필드에 열대야를(를) 깐다. 화속성 카드의 코스트가 1 감소한다."
   },
   {
     "id": "terrain_earth_1",
@@ -563,7 +617,8 @@
     "attackPower": 0,
     "defensePower": 0,
     "synergyBonus": 0,
-    "description": "토속성 카드의 코스트가 1 감소한다 (효과 미구현 - 현재는 지형 교체만 적용됨)"
+    "costReduction": 1,
+    "description": "필드에 건조한사막을(를) 깐다. 토속성 카드의 코스트가 1 감소한다."
   },
   {
     "id": "terrain_metal_1",
@@ -585,7 +640,8 @@
     "attackPower": 0,
     "defensePower": 0,
     "synergyBonus": 0,
-    "description": "금속성 카드의 코스트가 1 감소한다 (효과 미구현 - 현재는 지형 교체만 적용됨)"
+    "costReduction": 1,
+    "description": "필드에 서늘한밤을(를) 깐다. 금속성 카드의 코스트가 1 감소한다."
   },
   {
     "id": "terrain_water_1",
@@ -607,7 +663,8 @@
     "attackPower": 0,
     "defensePower": 0,
     "synergyBonus": 0,
-    "description": "수속성 카드의 코스트가 1 감소한다 (효과 미구현 - 현재는 지형 교체만 적용됨)"
+    "costReduction": 1,
+    "description": "필드에 장마철을(를) 깐다. 수속성 카드의 코스트가 1 감소한다."
   },
   {
     "id": "effect_wood_1",
@@ -631,7 +688,8 @@
     "defensePower": 0,
     "tickDamage": 0,
     "durationTurns": 2,
-    "description": "상대 전원의 카드 코스트가 1 증가한다 (효과 미구현 - 현재는 필드에 설치만 되고 아무 효과도 없음)"
+    "costUpAmount": 1,
+    "description": "2턴 동안 자신을 제외한 상대 전원의 카드 코스트가 1 증가한다."
   },
   {
     "id": "effect_fire_1",
@@ -655,7 +713,8 @@
     "defensePower": 0,
     "tickDamage": 0,
     "durationTurns": 3,
-    "description": "화속성 카드의 피해가 4 증가한다 (효과 미구현 - 현재는 필드에 설치만 되고 아무 효과도 없음)"
+    "damageBonusAmount": 4,
+    "description": "3턴 동안 화속성 공격 카드의 피해가 4 증가한다."
   },
   {
     "id": "effect_earth_1",
@@ -703,7 +762,8 @@
     "defensePower": 0,
     "tickDamage": 0,
     "durationTurns": 3,
-    "description": "자신의 최대 공격 코스트가 1 증가한다 (효과 미구현 - 현재는 필드에 설치만 되고 아무 효과도 없음)"
+    "maxAttackCostBuffAmount": 1,
+    "description": "3턴 동안 자신의 최대 공격 코스트가 1 증가한다."
   },
   {
     "id": "effect_water_1",
@@ -727,6 +787,7 @@
     "defensePower": 0,
     "tickDamage": 0,
     "durationTurns": 3,
-    "description": "수속성 카드의 코스트가 1 감소한다 (효과 미구현 - 현재는 필드에 설치만 되고 아무 효과도 없음)"
+    "costReductionAmount": 1,
+    "description": "3턴 동안 전원의 수속성 카드 코스트가 1 감소한다."
   }
 ]
