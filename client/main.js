@@ -37,6 +37,8 @@ const cancelDefenseBtn = document.getElementById("cancelDefenseBtn"); // 좌하�
 
 const gameOverSection = document.getElementById("gameOver");
 const winnerLabel = document.getElementById("winnerLabel");
+const playAgainBtn = document.getElementById("playAgainBtn"); // 재시작(2026-08-27 추가) - 방장에게만 보임
+const playAgainHint = document.getElementById("playAgainHint"); // 방장이 아닌 사람에게 보이는 안내 문구
 
 const connectionBanner = document.getElementById("connectionBanner");
 
@@ -45,9 +47,58 @@ const castCard = document.getElementById("castCard");
 
 const combatOverlay = document.getElementById("combatOverlay"); // 공격/방어 카드가 겹쳐 보이는 전투 연출 (전원 공통)
 const combatStack = document.getElementById("combatStack");
+const combatResultNumber = document.getElementById("combatResultNumber"); // 전투 결과 수치("-12" / "방어함") 큰 글씨 (2026-08-29)
+
+const handSwapOverlay = document.getElementById("handSwapOverlay"); // 손패 교체(2026-08-27 추가) 안내용 오버레이
+const handSwapNewCard = document.getElementById("handSwapNewCard"); // 왼쪽: 새로 뽑은 카드
+const handSwapReplaceCard = document.getElementById("handSwapReplaceCard"); // 오른쪽: 바꿀 카드로 고른 것(없으면 빈 칸)
+const handSwapDeclineBtn = document.getElementById("handSwapDeclineBtn"); // "변경하지 않음"
+const handSwapClearBtn = document.getElementById("handSwapClearBtn"); // "선택 취소"
+const handSwapConfirmBtn = document.getElementById("handSwapConfirmBtn"); // "교체하기"
+
+// ---- 재접속(reconnect) 처리 (2026-08-27 추가) ----
+// socket.id는 연결이 끊겼다 다시 붙을 때마다 매번 새로 발급되는 값이라, 서버 입장에서
+// "아까 그 사람이 돌아왔다"를 알아볼 수가 없습니다. 그래서 브라우저에 영구적으로 저장되는
+// 별도의 식별자(token)를 하나 만들어서, 방을 만들거나 들어갈 때마다 서버에 같이 보내줍니다.
+// localStorage는 탭을 닫았다 열거나 새로고침해도 그대로 남아있어서(서버를 재시작해도 안 지워짐),
+// "같은 브라우저"라는 걸 증명하는 열쇠로 쓸 수 있습니다.
+const PLAYER_TOKEN_KEY = "fieldwar_playerToken";
+const SESSION_KEY = "fieldwar_session"; // { roomId, nickname } - 지금 들어가 있는 방 정보
+
+function getOrCreatePlayerToken() {
+  let token = localStorage.getItem(PLAYER_TOKEN_KEY);
+  if (!token) {
+    // crypto.randomUUID()는 최신 브라우저면 다 있음 - 진짜 로그인이 아니라 그냥 "이 브라우저"를
+    // 구분하기 위한 무작위 값이라 굳이 서버에서 발급받을 필요 없이 클라이언트에서 만들어도 안전함
+    token = crypto.randomUUID();
+    localStorage.setItem(PLAYER_TOKEN_KEY, token);
+  }
+  return token;
+}
+
+const playerToken = getOrCreatePlayerToken();
+
+function saveSession(roomId, nickname) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify({ roomId, nickname }));
+}
+
+function loadSession() {
+  const raw = localStorage.getItem(SESSION_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return null; // 저장된 값이 손상되어 있으면 그냥 없는 것으로 취급
+  }
+}
+
+function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+}
 
 let myNickname = "";
 let currentRoomId = "";
+let currentHostSocketId = null; // 방장(2026-08-27 추가) - 게임 종료 화면에서 "다시 시작" 버튼을 방장에게만 보여주기 위해 기억해둠
 let latestPlayers = []; // 닉네임/HP 표시용으로 마지막 방 상태를 기억해둠
 let lastKnownTurnSocketId = null;
 let myHand = []; // 카드 상세 정보가 포함된 내 손패 (game:handUpdated로 갱신됨)
@@ -70,10 +121,23 @@ let isCasting = false;
 // 이 동안에는 renderHand()가 방어 카드만 선택 가능하게(defendable) 바꿔줍니다 (더 이상 팝업 없음).
 let isDefending = false;
 
+// 지금 나에게 들어온 공격의 속성 (game:defenseRequest로 받음, game:combatResult에서 비움).
+// 방어 카드가 이 속성을 상극하면 상극 보너스(+5)가 붙으므로, 손패의 방어력 표기를 금색으로
+// 보정해서 보여주기 위해 기억해둠 (2026-08-29)
+let pendingAttackElement = null;
+
 // 방어하는 동안 지금까지 "선택"해둔(아직 서버에는 안 보낸) 방어 카드 instanceId 목록.
 // "사용" 버튼을 눌러야 실제로 game:confirmDefense로 서버에 보내지고, "취소"를 누르면 그냥
 // 이 목록만 비워집니다 (서버에는 아무 영향 없음 - 코스트가 부족해서 막힌 채 멈추는 문제를 피하기 위함)
 let selectedDefenseCardIds = [];
+
+// 손패 교체 (2026-08-27 추가): 서버로부터 game:handSwapOffered를 받으면 { card }로 채워짐
+// (card는 새로 뽑았지만 아직 손패에 안 들어간 카드). null이면 교체 제안이 없는 평소 상태.
+let pendingHandSwap = null;
+
+// 손패 교체 중, 지금까지 "바꿀 카드"로 고른(아직 서버에는 안 보낸) 손패 카드의 instanceId.
+// isDefending과 마찬가지로 로컬 선택만 해뒀다가 "교체하기"를 눌러야 서버에 반영됨
+let selectedSwapReplaceInstanceId = null;
 
 // 지형/효과 카드를 화면 중앙(#castOverlay)에 띄워놓고 "클릭해서 확정 / 바깥 클릭해서 취소"를
 // 기다리는 중이면 { cardInstanceId }, 아니면 null. 나만 보는 로컬 UI라서 서버 방송과는 무관함
@@ -93,6 +157,67 @@ let combatStackCards = [];
 const ELEMENT_ICONS = { 목: "🌳", 화: "🔥", 토: "⛰️", 금: "⚙️", 수: "💧" };
 function elementIcon(element) {
   return ELEMENT_ICONS[element] || "";
+}
+
+// 오행 상성 (서버 elementTable.js와 같은 값). 손패 카드의 "현재 코스트/위력 변동분"을 클라이언트가
+// 직접 계산해서 금색으로 보여주기 위해 필요 (실제 판정은 여전히 서버 전담, 여기는 표시용)
+const GENERATE_MAP = { 목: "화", 화: "토", 토: "금", 금: "수", 수: "목" }; // key가 value를 강화(상생)
+const COUNTER_MAP = { 목: "토", 토: "수", 수: "화", 화: "금", 금: "목" }; // key가 value를 상극(카운터)
+const COUNTER_BONUS = 5; // 방어 속성이 공격 속성을 상극할 때 방어력에 붙는 고정 보너스 (서버 상수와 동일)
+
+// 나(본인) 플레이어 객체 (latestPlayers 기준). 없으면 null
+function getMe() {
+  return latestPlayers.find((p) => p.socketId === socket.id) || null;
+}
+function myStatusTotal(type) {
+  const me = getMe();
+  if (!me || !me.statuses) return 0;
+  return me.statuses.filter((s) => s.type === type).reduce((sum, s) => sum + (s.amount || 0), 0);
+}
+
+// 손패 공격/방어 카드에 "지금 이 순간" 붙는 위력 보정치의 합 (지형 상생 + 내 버프 + 필드효과 +
+// 방어 중이면 상극 보너스). 0이면 보정 없음. (2026-08-29)
+function getCardPowerBonus(card) {
+  if (!card || (card.type !== "attack" && card.type !== "defense")) return 0;
+  // 서버가 굴려 보낸 임시 연출 카드(min/max 없음)에는 이미 보너스가 반영돼 있으므로 건드리지 않음
+  const rangeKey = card.type === "attack" ? "attackPowerMin" : "defensePowerMin";
+  if (card[rangeKey] == null) return 0;
+
+  let bonus = 0;
+  // 지형 상생: 지형 속성 자신 또는 지형이 상생하는 속성이면 synergyBonus
+  if (latestTerrain) {
+    const boosted = GENERATE_MAP[latestTerrain.element];
+    if (card.element === latestTerrain.element || card.element === boosted) {
+      bonus += latestTerrain.synergyBonus || 0;
+    }
+  }
+  // 필드효과(작열의기운 등): 같은 속성이면 damageBonusAmount 합산
+  bonus += (latestEffects || [])
+    .filter((e) => e.element === card.element)
+    .reduce((sum, e) => sum + (e.damageBonusAmount || 0), 0);
+
+  if (card.type === "attack") {
+    bonus += myStatusTotal("attackBuff");
+  } else {
+    bonus += myStatusTotal("defBuff");
+    // 방어 중이고, 이 방어 카드가 들어온 공격 속성을 상극하면 상극 보너스
+    if (isDefending && pendingAttackElement && COUNTER_MAP[card.element] === pendingAttackElement) {
+      bonus += COUNTER_BONUS;
+    }
+  }
+  return bonus;
+}
+
+// 손패 카드의 "지금 이 순간" 실제 코스트와, 그게 인쇄값과 다른지 여부. (2026-08-29)
+// 코스트 계산은 서버가 권위자라서, 서버가 손패로 내려주는 effectiveCost를 그대로 신뢰함.
+// (지형/효과로 남의 코스트가 바뀌는 경우에도 항상 최신이도록 서버가 game:playFieldCard 때
+//  전원에게 손패를 다시 보내줌 - gameHandlers.js 참고). 연출용 임시 카드엔 effectiveCost가
+// 없으므로 그때는 변동 없음으로 취급.
+function getCardCostInfo(card) {
+  if (card.effectiveCost === undefined) {
+    return { cost: card.cost != null ? card.cost : getDisplayCost(card), modified: false };
+  }
+  return { cost: card.effectiveCost, modified: card.effectiveCost !== card.cost };
 }
 
 // 카드 타입 -> CSS 클래스 (손패/시전 연출에서 공용으로 씀)
@@ -120,11 +245,13 @@ const ELEMENT_BACKGROUNDS = {
   금: "radial-gradient(circle at 50% 15%, #3a3a45, #1b1b2f 70%)",
   수: "radial-gradient(circle at 50% 15%, #123a4d, #1b1b2f 70%)",
 };
-const DEFAULT_BACKGROUND = "#1b1b2f";
+const DEFAULT_BACKGROUND = "#24243e"; // .game-board 기본 배경색과 동일 (2026-08-27, 고정 크기 박스 UI 도입)
 
-// 현재 깔린 지형에 맞춰 페이지 배경 테마를 바꿈 (없으면 기본 배경으로 복귀)
+// 현재 깔린 지형에 맞춰 배경 테마를 바꿈 (없으면 기본 배경으로 복귀)
+// 예전에는 document.body에 적용했는데, 게임 보드가 배경과 구분되는 별도 박스(.game-board)로
+// 바뀌면서 body 배경은 박스 뒤에 가려 안 보이게 됨 -> 박스 자체(gameSection)에 적용하도록 변경
 function applyTerrainBackground() {
-  document.body.style.background = latestTerrain
+  gameSection.style.background = latestTerrain
     ? ELEMENT_BACKGROUNDS[latestTerrain.element] || DEFAULT_BACKGROUND
     : DEFAULT_BACKGROUND;
 }
@@ -140,23 +267,50 @@ function getDisplayCost(card) {
 // 개발자가 준 스케치 기준(2026-08-29 개편): 상단 줄(타입 아이콘/이름/코스트) - 이미지 영역(속성 아이콘으로
 // 대신함) - 설명(효과) 영역 - 하단 줄(속성/수치). 전투 연출에서 서버가 만들어 보내는 임시 카드 객체는
 // description이 없을 수 있어서 그 경우 빈 칸으로 둠
+// 공격/방어 카드의 위력 표기 (2026-08-29: 이제 고정값이 아니라 범위라서 "2~5"처럼 보여줌).
+// 서버가 전투 연출용으로 보내는 임시 카드 객체엔 min/max가 없고 이미 굴려진 단일 수치만 있어서,
+// 그 경우엔 그 숫자를 그대로 씀
+function powerText(card, kind) {
+  const min = card[`${kind}PowerMin`];
+  const max = card[`${kind}PowerMax`];
+  if (min != null && max != null) return min === max ? `${min}` : `${min}~${max}`;
+  return `${card[`${kind}Power`]}`;
+}
+
+// 공격/방어 카드 하단의 위력 표기. 지금 이 순간 지형/버프/상극 등으로 위력이 바뀌어 있으면
+// 인쇄된 범위 대신 "보정된 범위"를 금색(.value-modified)으로 보여줌 (2026-08-29)
+function powerLabel(card, kind, icon) {
+  const bonus = getCardPowerBonus(card);
+  if (bonus === 0) return `${icon} ${powerText(card, kind)}`;
+  const min = card[`${kind}PowerMin`];
+  const max = card[`${kind}PowerMax`];
+  const shifted =
+    min === max ? `${min + bonus}` : `${min + bonus}~${max + bonus}`;
+  return `${icon} <span class="value-modified">${shifted}</span>`;
+}
+
 function buildCardFaceHtml(card) {
   let statLabel;
   if (card.type === "attack") {
-    statLabel = `⚔ ${card.attackPower}`;
+    statLabel = powerLabel(card, "attack", "⚔");
   } else if (card.type === "defense") {
-    statLabel = `🛡 ${card.defensePower}`;
+    statLabel = powerLabel(card, "defense", "🛡");
   } else if (card.type === "terrain") {
     statLabel = `+${card.synergyBonus}`;
   } else {
     statLabel = `☠ ${card.tickDamage}`;
   }
 
+  const costInfo = getCardCostInfo(card);
+  const costBadge = costInfo.modified
+    ? `<div class="card-cost-badge value-modified">${costInfo.cost}</div>`
+    : `<div class="card-cost-badge">${costInfo.cost}</div>`;
+
   return `
     <div class="card-top-row">
       <div class="card-type-icon">${TYPE_ICON_MAP[card.type] || ""}</div>
       <div class="card-name">${card.name}</div>
-      <div class="card-cost-badge">${getDisplayCost(card)}</div>
+      ${costBadge}
     </div>
     <div class="card-image-area">${elementIcon(card.element)}</div>
     <div class="card-desc-area">${card.description || ""}</div>
@@ -170,12 +324,13 @@ function buildCardFaceHtml(card) {
 // 카드 얼굴에는 다 못 담는 상세 설명. 버튼의 title 속성으로 넣어두면 마우스를 올렸을 때
 // 브라우저 기본 툴팁으로 보여줌 (카드 디자인을 안 건드리고 정보를 보완하는 용도)
 function buildCardTitleText(card) {
-  const cost = getDisplayCost(card);
-  if (card.type === "attack") {
-    return `${card.name} · 공격력 ${card.attackPower} · ${card.element}속성 · 코스트 ${cost}`;
-  }
-  if (card.type === "defense") {
-    return `${card.name} · 방어력 ${card.defensePower} · ${card.element}속성 · 코스트 ${cost}`;
+  const { cost } = getCardCostInfo(card);
+  if (card.type === "attack" || card.type === "defense") {
+    const kind = card.type === "attack" ? "attack" : "defense";
+    const label = card.type === "attack" ? "공격력" : "방어력";
+    const bonus = getCardPowerBonus(card);
+    const bonusNote = bonus !== 0 ? ` (현재 지형/버프로 ${bonus > 0 ? "+" : ""}${bonus})` : "";
+    return `${card.name} · ${label} ${powerText(card, kind)}(사용할 때마다 무작위)${bonusNote} · ${card.element}속성 · 코스트 ${cost}`;
   }
   if (card.type === "terrain") {
     return `${card.name} · ${card.element}속성 및 상생 대상 속성 카드 위력 +${card.synergyBonus} · 코스트 ${cost}`;
@@ -191,7 +346,7 @@ createRoomBtn.addEventListener("click", () => {
     return;
   }
   // 서버에 "room:create" 이벤트를 보냄 (서버의 roomHandlers.js에서 이걸 받음)
-  socket.emit("room:create", { nickname: myNickname });
+  socket.emit("room:create", { nickname: myNickname, token: playerToken });
 });
 
 // ---- 방 입장 버튼 ----
@@ -208,12 +363,14 @@ joinRoomBtn.addEventListener("click", () => {
     return;
   }
   currentRoomId = roomId;
-  socket.emit("room:join", { roomId, nickname: myNickname });
+  saveSession(roomId, myNickname); // 성공했다고 가정하고 미리 저장 - 실패하면 room:rejoinFailed에서 알아서 지워짐
+  socket.emit("room:join", { roomId, nickname: myNickname, token: playerToken });
 });
 
 // ---- 서버가 "방 생성 완료"를 알려줄 때 ----
 socket.on("room:created", ({ roomId }) => {
   currentRoomId = roomId;
+  saveSession(roomId, myNickname); // 새로고침/재접속 시 이 방으로 자동으로 돌아오기 위해 기억해둠
   console.log("방 생성됨:", roomId);
 });
 
@@ -221,7 +378,15 @@ socket.on("room:created", ({ roomId }) => {
 // 방 안에 있는 모든 사람에게 매번 이 이벤트가 전달됩니다.
 socket.on("room:updated", (room) => {
   currentRoomId = room.roomId;
+  currentHostSocketId = room.hostSocketId;
   latestPlayers = room.players;
+
+  // 재접속 처리(2026-08-27): 게임이 끝난 게 아니라면(= 아직 이 방에서 뭔가 이어서 할 수 있다면)
+  // 세션을 계속 최신으로 저장해둠. "다시 시작"으로 대기실로 돌아온 경우에도 이 덕분에 세션이
+  // 다시 살아나서, 재시작한 새 게임 도중에도 새로고침하면 재접속이 됨
+  if (room.status !== "ended" && myNickname) {
+    saveSession(room.roomId, myNickname);
+  }
 
   // 게임이 이미 시작된 상태에서 이 이벤트가 온 거라면(예: 도중 참가는 지금 막혀있지만 방어적으로)
   // 대기실 화면으로 되돌리지 않고, 대신 전장(HP 등)을 최신 정보로 다시 그림
@@ -232,16 +397,24 @@ socket.on("room:updated", (room) => {
     renderMyStatus();
     renderOpponents();
     renderFieldStatus();
+    // 지형/필드효과/내 버프가 바뀌면 손패 카드의 "현재 코스트·위력"(금색 표기)도 달라지므로 다시 그림
+    // (2026-08-29). renderHand는 myHand 배열만 참조하므로 저렴하고, 손패 자체 내용은 안 바뀜
+    renderHand();
     return;
   }
   if (room.status === "ended") {
-    return; // 게임 종료 화면은 game:over 이벤트에서 처리
+    // 보통은 game:over 이벤트로 이미 처리되지만, 게임이 끝난 뒤에 재접속한 사람은 그 순간
+    // 연결이 끊겨있어서 game:over를 못 받았을 수 있음 - 그런 경우를 위해 room.winnerNickname으로
+    // 여기서도 같은 화면을 보여줌 (재접속 처리, 2026-08-27)
+    showGameOverScreen(room.winnerNickname);
+    return;
   }
 
   appDiv.classList.remove("hidden");
   lobbySection.classList.add("hidden");
   roomSection.classList.remove("hidden");
   gameSection.classList.add("hidden");
+  gameOverSection.classList.add("hidden"); // 재시작(2026-08-27)으로 대기실로 돌아온 경우, 이전 게임 종료 화면을 정리
 
   roomIdLabel.textContent = room.roomId;
 
@@ -266,19 +439,48 @@ socket.on("error", ({ message }) => {
   showError(message);
 });
 
-// ---- 연결 끊김 / 재연결 ----
+// ---- 연결 끊김 / 재연결 (2026-08-27: 재접속 처리 추가) ----
 // Socket.io 클라이언트는 기본적으로 연결이 끊기면 자동으로 재연결을 계속 시도합니다.
-// 여기서는 그동안 "연결이 끊겼다"는 걸 사용자에게 보여주는 배너만 처리합니다.
+// 재연결에 성공하면 서버 입장에서는 새로운 socket.id를 가진 "새 연결"이라, 예전에는 방/게임에
+// 다시 자동으로 들어가지는 게 아니라 완전히 새로 접속한 것처럼 처리됐습니다.
 //
-// 주의(중요): 재연결에 성공하면 서버 입장에서는 새로운 socket.id를 가진 "새 연결"입니다.
-// 즉, 방/게임에 다시 자동으로 들어가지는 것이 아니라 완전히 새로 접속한 것처럼 처리됩니다.
-// (같은 사람이 같은 게임에 이어서 들어오게 하려면 세션/재입장 로직이 추가로 필요 - 아직 미구현)
+// 이제는 localStorage에 저장해둔 세션(방 코드 + 내 토큰)이 있으면, 연결될 때마다(최초 접속이든
+// 와이파이가 끊겼다 자동 재연결됐든, 페이지를 새로고침했든 전부 여기로 옴) 그 방으로 재접속을
+// 시도합니다. 서버가 유예시간(60초) 안이라고 판단하면 손패/HP/턴까지 그대로 이어서 할 수 있고,
+// 유예시간이 지났거나 방이 사라졌으면 room:rejoinFailed로 알려주므로 그때는 세션을 지우고
+// 평범한 로비 화면으로 돌아갑니다.
 socket.on("disconnect", () => {
   connectionBanner.classList.remove("hidden");
 });
 
 socket.on("connect", () => {
   connectionBanner.classList.add("hidden");
+
+  const session = loadSession();
+  if (session) {
+    socket.emit("room:rejoin", { roomId: session.roomId, token: playerToken });
+  }
+});
+
+// ---- 서버가 "재접속 성공"을 알려줄 때 (본인에게만 옴) ----
+// 이후 room:updated가 곧이어 도착해서 실제 화면(대기실/전장)을 그려줌 - 여기서는 화면 전환에
+// 필요한 최소한의 상태만 미리 맞춰둠
+socket.on("room:rejoined", ({ roomId }) => {
+  currentRoomId = roomId;
+  console.log("재접속 성공:", roomId);
+});
+
+// ---- 서버가 "재접속 실패"를 알려줄 때 (방이 사라졌거나, 유예시간이 지나서 이미 내보내진 경우) ----
+socket.on("room:rejoinFailed", ({ message }) => {
+  console.log("재접속 실패:", message);
+  clearSession();
+  // 로비 화면으로 되돌림 (혹시 게임 화면이 남아있을 수 있으니 정리)
+  gameSection.classList.add("hidden");
+  appDiv.classList.remove("hidden");
+  lobbySection.classList.remove("hidden");
+  roomSection.classList.add("hidden");
+  gameOverSection.classList.add("hidden");
+  showError(message);
 });
 
 function showError(message) {
@@ -428,6 +630,79 @@ castOverlay.addEventListener("click", (e) => {
   }
 });
 
+// ---- 손패 교체 (2026-08-27 추가) ----
+// 손패가 가득 찬(9장) 상태에서 자기 턴이 끝나 카드를 뽑으면 서버가 game:handSwapOffered를 보내고,
+// 그때부터 이 상태가 활성화됩니다. 방어(isDefending)와 같은 패턴: 실제 선택은 아래 손패를 직접
+// 클릭해서 하고(renderHand 참고), "교체하기"를 눌러야 서버에 반영됩니다. 게임 진행을 막지는
+// 않으므로(다른 사람 턴이 계속 진행됨) 원할 때 아무 때나 답해도 됩니다.
+function openHandSwap(card) {
+  pendingHandSwap = { card };
+  selectedSwapReplaceInstanceId = null;
+  renderHandSwapOverlay();
+  renderHand();
+}
+
+function closeHandSwap() {
+  pendingHandSwap = null;
+  selectedSwapReplaceInstanceId = null;
+  handSwapOverlay.classList.add("hidden");
+  handSwapDeclineBtn.classList.add("hidden");
+  handSwapClearBtn.classList.add("hidden");
+  handSwapConfirmBtn.classList.add("hidden");
+  renderHand();
+}
+
+// 왼쪽(새 카드)/오른쪽(바꿀 카드로 고른 것) 슬롯과 버튼 표시 여부를 지금 상태에 맞춰 다시 그림
+function renderHandSwapOverlay() {
+  if (!pendingHandSwap) return;
+
+  handSwapOverlay.classList.remove("hidden");
+  handSwapDeclineBtn.classList.remove("hidden");
+
+  handSwapNewCard.innerHTML = `<div class="card-btn ${TYPE_CLASS_MAP[pendingHandSwap.card.type]}">${buildCardFaceHtml(
+    pendingHandSwap.card
+  )}</div>`;
+
+  const selectedCard = selectedSwapReplaceInstanceId
+    ? myHand.find((c) => c.instanceId === selectedSwapReplaceInstanceId)
+    : null;
+
+  if (selectedCard) {
+    handSwapReplaceCard.className = "";
+    handSwapReplaceCard.innerHTML = `<div class="card-btn ${TYPE_CLASS_MAP[selectedCard.type]}">${buildCardFaceHtml(
+      selectedCard
+    )}</div>`;
+    handSwapClearBtn.classList.remove("hidden");
+    handSwapConfirmBtn.classList.remove("hidden");
+  } else {
+    handSwapReplaceCard.className = "hand-swap-placeholder";
+    handSwapReplaceCard.innerHTML = "아래 손패에서<br />바꿀 카드를 클릭하세요";
+    handSwapClearBtn.classList.add("hidden");
+    handSwapConfirmBtn.classList.add("hidden");
+  }
+}
+
+handSwapDeclineBtn.addEventListener("click", () => {
+  socket.emit("game:resolveHandSwap", { roomId: currentRoomId, replaceInstanceId: null });
+  closeHandSwap();
+});
+
+handSwapClearBtn.addEventListener("click", () => {
+  selectedSwapReplaceInstanceId = null;
+  renderHandSwapOverlay();
+  renderHand();
+});
+
+handSwapConfirmBtn.addEventListener("click", () => {
+  socket.emit("game:resolveHandSwap", { roomId: currentRoomId, replaceInstanceId: selectedSwapReplaceInstanceId });
+  closeHandSwap();
+});
+
+// ---- 서버가 "손패가 가득 차서 교체할지 물어봄"을 알려줄 때 (본인에게만 옴) ----
+socket.on("game:handSwapOffered", ({ card }) => {
+  openHandSwap(card);
+});
+
 // ---- 전투 연출: 공격 카드 + 방어 카드(들)가 겹쳐 쌓이는 화면 (2026-08-27) ----
 // 서버 방송(game:attackAnnounced/game:defenseCardApplied)으로 채워지므로 모든 플레이어에게
 // 똑같이 보입니다. 카드는 하나씩 "추가"만 되고(기존 카드를 다시 그리지 않음), 그래야 새로
@@ -444,8 +719,8 @@ function appendCombatStackCard(cardData) {
 
 // 방어자 본인이 손패에서 방어 카드를 "선택"한 순간, 서버 응답을 기다리지 않고
 // 곧바로 내 화면에서만 미리 겹쳐 보여줌 (실제 서버 반영은 "사용"을 눌러야 일어남).
-// 상극/지형 보너스는 서버만 계산할 수 있으므로, 여기서는 카드 자체의 기본 방어력만 보여줌
-// (정확한 최종 수치는 결과가 나온 뒤 전투 로그에 표시됨).
+// 상극/지형 보너스는 서버만 계산할 수 있고, 방어력 자체도 확정 시점에 무작위로 굴려지므로(2026-08-29)
+// 여기서는 범위(예: 2~5)만 보여줌 - 정확한 최종 수치는 결과가 나온 뒤 전투 로그에 표시됨.
 function previewLocalDefenseCard(card) {
   appendCombatStackCard({
     instanceId: card.instanceId,
@@ -454,6 +729,8 @@ function previewLocalDefenseCard(card) {
     element: card.element,
     cost: card.cost,
     defensePower: card.defensePower,
+    defensePowerMin: card.defensePowerMin,
+    defensePowerMax: card.defensePowerMax,
   });
 }
 
@@ -470,6 +747,7 @@ function removeLocalDefenseCardFromStack(instanceId) {
 function showAttackInStack(data) {
   combatStackCards = [];
   combatStack.innerHTML = "";
+  combatResultNumber.classList.remove("show"); // 직전 결과 수치가 남아있으면 지움
   combatOverlay.classList.remove("fading-out");
   appendCombatStackCard({ type: "attack", name: data.cardName, element: data.element, cost: data.cost, attackPower: data.attackPower });
   combatOverlay.classList.remove("hidden");
@@ -510,7 +788,7 @@ const STATUS_BADGE_MAP = {
   // 8단계 Phase 3, 2026-08-26
   damageReduction: { icon: "🧱", label: "피해감소" },
   costUp: { icon: "💸", label: "코스트+" },
-  maxAttackCostBuff: { icon: "🔋", label: "최대코스트+" },
+  maxAttackCostBuff: { icon: "🔋", label: "충전+" },
 };
 
 // p.statuses를 작은 배지 목록으로 렌더링 (없으면 빈 문자열)
@@ -529,7 +807,11 @@ function buildStatusBadgesHtml(statuses) {
 // HP바 + 코스트 점(pip) 마크업을 만듦 (내 상태 카드/상대 상태 카드에서 공용으로 씀)
 function buildStatusCardInnerHtml(p) {
   const hpPercent = Math.max(0, Math.round((p.hp / p.maxHp) * 100));
+  // 재접속 처리(2026-08-27): 연결이 끊긴 사람은 유예시간(60초) 동안 자리를 그대로 유지하되,
+  // 다른 사람 화면에는 "연결 끊김"으로 표시해서 왜 반응이 없는지 알 수 있게 함
+  const disconnectedBadge = p.connected === false ? `<div class="disconnected-badge">🔌 연결 끊김 - 재접속 대기 중</div>` : "";
   return `
+    ${disconnectedBadge}
     <div class="status-hp-bar"><div class="status-hp-fill" style="width:${hpPercent}%"></div></div>
     <div class="status-hp-text">HP ${p.hp} / ${p.maxHp} · 카드 ${p.handCount}장</div>
     ${buildStatusBadgesHtml(p.statuses)}
@@ -683,6 +965,9 @@ function renderHand() {
     btn.style.zIndex = String(index);
 
     const isSelectedForDefense = selectedDefenseCardIds.includes(card.instanceId);
+    // 손패 교체(2026-08-27): 방어 중이면 방어가 더 급하니 방어가 우선이고, 그동안은 교체 선택을 잠깐 막음
+    const isSwapping = !isDefending && !!pendingHandSwap;
+    const isSelectedForSwap = card.instanceId === selectedSwapReplaceInstanceId;
 
     let affordable;
     let isDefendable = false;
@@ -697,29 +982,32 @@ function renderHand() {
         affordable = selectedDefenseCost + getDisplayCost(card) <= myDefenseCost;
       }
       isDefendable = card.type === "defense" && affordable && !isSelectedForDefense;
+    } else if (isSwapping) {
+      affordable = true; // 바꿀 카드 고르기는 코스트와 무관하게 아무 카드나 항상 선택 가능
     } else {
       // 평소에는 공격/효과 카드가 공격 코스트 기준으로 판단 (지형 카드는 코스트 0이라 항상 가능,
       // 방어 카드는 평소엔 낼 일이 없어서 그냥 항상 "가능"으로 둠 - 클릭해도 동작이 없을 뿐)
       affordable = card.type === "defense" || getDisplayCost(card) <= myAttackCost;
     }
 
-    const showSelected = isDefending ? isSelectedForDefense : isSelected;
+    const showSelected = isDefending ? isSelectedForDefense : isSwapping ? isSelectedForSwap : isSelected;
 
     btn.className =
       "card-btn " +
       TYPE_CLASS_MAP[card.type] +
       (showSelected ? " selected" : "") +
       (isDefendable ? " defendable" : "") +
+      (isSwapping && !isSelectedForSwap ? " swap-selectable" : "") +
       (!affordable ? " disabled" : "");
     btn.title = buildCardTitleText(card); // 마우스를 올리고 있으면 브라우저 툴팁으로 전체 설명이 보임
     btn.innerHTML = buildCardFaceHtml(card);
 
     btn.addEventListener("click", () => {
       if (pendingFieldCard || pendingMultiTargetAttack) return; // 카드 미리보기 중에는 항상 막음
-      // 전투 연출이 진행 중이면 새로 카드를 고르는 건 막되, 지금 방어해야 하는 본인은 예외
-      // (isCasting은 attackAnnounced~combatResult 동안 전원에게 true라서, 이 예외가 없으면
-      //  정작 방어 카드를 내야 하는 사람도 손패를 못 누르게 되어버림)
-      if (isCasting && !isDefending) return;
+      // 전투 연출이 진행 중이면 새로 카드를 고르는 건 막되, 지금 방어해야 하는 본인/손패 교체 중인
+      // 본인은 예외 (isCasting은 attackAnnounced~combatResult 동안 전원에게 true라서, 이 예외가
+      // 없으면 정작 방어 카드를 내야 하는 사람이나 손패를 정리해야 하는 사람도 손패를 못 누르게 됨)
+      if (isCasting && !isDefending && !isSwapping) return;
       if (!affordable) return; // 코스트 부족하거나(또는 방어 중에 방어 카드가 아니면) 선택 불가
 
       if (isDefending) {
@@ -732,6 +1020,14 @@ function renderHand() {
           selectedDefenseCardIds.push(card.instanceId);
           previewLocalDefenseCard(card);
         }
+        renderHand();
+        return;
+      }
+
+      if (isSwapping) {
+        // 서버에는 아직 아무 것도 안 보내고, 로컬 선택만 토글함 ("교체하기"를 눌러야 반영됨)
+        selectedSwapReplaceInstanceId = isSelectedForSwap ? null : card.instanceId;
+        renderHandSwapOverlay();
         renderHand();
         return;
       }
@@ -795,6 +1091,7 @@ socket.on(
   )}"(${element}속성, 공격력 ${attackPower})${bonusHtml}(으)로 공격했습니다! 아래 손패에서 방어 카드를 고른 뒤 "사용"을 누르세요.`;
 
   isDefending = true;
+  pendingAttackElement = element; // 상극이면 방어력 금색 보정 표기에 씀 (2026-08-29)
   selectedDefenseCardIds = [];
   defenseBanner.classList.remove("hidden");
   confirmDefenseBtn.classList.remove("hidden");
@@ -914,12 +1211,17 @@ socket.on(
     // 전투가 실제로 끝났으니, 내가 방어자였다면 배너/버튼을 닫고 손패를 평소 상태로 되돌림
     if (isDefending) {
       isDefending = false;
+      pendingAttackElement = null;
       selectedDefenseCardIds = [];
       defenseBanner.classList.add("hidden");
       confirmDefenseBtn.classList.add("hidden");
       cancelDefenseBtn.classList.add("hidden");
       renderHand();
     }
+
+    // 화면 중앙의 공격/방어 카드가 사라진 뒤, 이번 공격으로 들어간 피해 수치(또는 "방어함")를
+    // 큼직하게 잠깐 띄움 (2026-08-29). 다중 대상이면 카드가 안 사라지므로 짧게 겹쳐 보여줌
+    showCombatResultNumber(damageDealt, hasMoreTargets);
 
     // 다중 대상 카드(흙먼지폭풍 등)가 아직 다음 대상에게 이어질 예정이면, 연출을 끄지 않고 이어감
     // (곧바로 game:attackAnnounced가 다시 와서 카드 내용을 새로 채워줌 - 8단계 Phase 3, 2026-08-26)
@@ -930,6 +1232,25 @@ socket.on(
     }
   }
 );
+
+// 화면 중앙에 이번 전투 결과 수치를 잠깐 띄움. damage가 0 이하면 "방어함"으로 표시.
+// delayLong=true(단일 대상)면 중앙 카드가 페이드아웃으로 사라진 뒤에 뜨도록 딜레이를 길게 줌.
+function showCombatResultNumber(damage, hasMoreTargets) {
+  const isBlocked = !(damage > 0);
+  const text = isBlocked ? "방어함" : `-${damage}`;
+  const delay = hasMoreTargets ? 350 : 900; // 900ms ≈ clearCombatStackWithDelay가 카드를 지우는 시점
+
+  window.setTimeout(() => {
+    combatResultNumber.textContent = text;
+    combatResultNumber.className = "combat-result-number" + (isBlocked ? " blocked" : "");
+    // 방금 붙인 클래스로 트랜지션이 시작되도록 강제 리플로우 후 show
+    void combatResultNumber.offsetWidth;
+    combatResultNumber.classList.add("show");
+    window.setTimeout(() => {
+      combatResultNumber.classList.remove("show");
+    }, 1100);
+  }, delay);
+}
 
 // ---- 누군가 기절 상태라 턴을 자동으로 건너뛸 때 (8단계 Phase 2, 2026-08-26) ----
 socket.on("game:playerStunned", ({ nickname, remainingTurns }) => {
@@ -975,12 +1296,21 @@ socket.on("game:effectsTicked", ({ effects }) => {
 });
 
 // ---- 게임 종료 ----
-socket.on("game:over", ({ winnerNickname }) => {
+// 게임 종료 화면 전환. game:over(그 순간 연결되어 있던 사람들에게 방송)와, 게임이 이미 끝난
+// 뒤에 재접속한 사람이 room:updated(status:"ended")로 결과를 알게 되는 경우 양쪽에서 공용으로 씀
+// (재접속 처리, 2026-08-27)
+function showGameOverScreen(winnerNickname) {
   gameSection.classList.add("hidden");
+  // #room/#lobby는 대기실 단계 이후로 다시 hidden이 안 붙은 채로 남아있을 수 있음 (게임 중엔
+  // #app 자체가 숨겨져 있어서 안 보였을 뿐, 클래스 자체는 그대로였음) - #app을 다시 보여주기
+  // 전에 명시적으로 정리해둬야 게임 종료 화면 위에 대기실 내용이 같이 겹쳐 보이는 걸 막을 수 있음
+  lobbySection.classList.add("hidden");
+  roomSection.classList.add("hidden");
   defenseBanner.classList.add("hidden");
   confirmDefenseBtn.classList.add("hidden");
   cancelDefenseBtn.classList.add("hidden");
   isDefending = false;
+  pendingAttackElement = null;
   selectedDefenseCardIds = [];
   pendingFieldCard = null;
   castOverlay.classList.add("hidden");
@@ -989,8 +1319,28 @@ socket.on("game:over", ({ winnerNickname }) => {
   combatOverlay.classList.remove("fading-out");
   combatStack.innerHTML = "";
   combatStackCards = [];
+  combatResultNumber.classList.remove("show");
+  pendingHandSwap = null; // 손패 교체 도중 게임이 끝났을 수도 있으니 같이 정리
+  selectedSwapReplaceInstanceId = null;
+  handSwapOverlay.classList.add("hidden");
+  handSwapDeclineBtn.classList.add("hidden");
+  handSwapClearBtn.classList.add("hidden");
+  handSwapConfirmBtn.classList.add("hidden");
   appDiv.classList.remove("hidden"); // 게임 보드를 숨기고 #app(게임 종료 화면)을 다시 보여줌
-  document.body.style.background = DEFAULT_BACKGROUND; // 지형 배경 테마도 기본값으로 복귀
+  gameSection.style.background = DEFAULT_BACKGROUND; // 지형 배경 테마도 기본값으로 복귀
   gameOverSection.classList.remove("hidden");
   winnerLabel.textContent = winnerNickname ? `승자: ${winnerNickname}` : "생존자가 없습니다.";
+  // 재시작(2026-08-27): 방장에게만 "다시 시작" 버튼을, 나머지에게는 안내 문구를 보여줌
+  const isHost = currentHostSocketId === socket.id;
+  playAgainBtn.classList.toggle("hidden", !isHost);
+  playAgainHint.classList.toggle("hidden", isHost);
+  clearSession(); // 게임이 끝났으니 다음에 새로고침해도 이 방으로 재접속을 시도하지 않게 함
+}
+
+playAgainBtn.addEventListener("click", () => {
+  socket.emit("game:playAgain", { roomId: currentRoomId });
+});
+
+socket.on("game:over", ({ winnerNickname }) => {
+  showGameOverScreen(winnerNickname);
 });

@@ -5,6 +5,17 @@
 
 const { GENERATE_MAP } = require("./elementTable");
 
+// 코스트 점(pip) UI가 감당할 수 있는 상한. 공격 코스트는 2026-08-28 개편으로 매 턴 "초기화"되지
+// 않고 안 쓴 만큼 계속 쌓이는데(아래 rechargeAttackCostsForRound 참고), 아무리 안 써도 이 값을 넘지
+// 못하게 막음. 정기서린땅 같은 "충전량 증가" 효과가 겹쳐도 마찬가지 (개발자 요청, 2026-08-27 / 2026-08-28)
+const MAX_COST_CAP = 7;
+
+// 공격 코스트 재충전량 (2026-08-28 개편 / 2026-08-29 라운드 단위로 조정). 예전에는 매 턴
+// maxAttackCost(3)로 통째로 초기화됐지만, 이제는 안 쓴 코스트가 이월되고 "전체 턴 순서가 한
+// 바퀴 돌 때마다" 전원에게 이만큼씩만 충전됩니다(rechargeAttackCostsForRound 참고).
+// 정기서린땅(maxAttackCostBuff 상태)이 걸려 있으면 그 수치만큼 충전량이 더 늘어납니다.
+const ATTACK_COST_RECHARGE_PER_TURN = 1;
+
 class Room {
   constructor(roomId, hostSocketId) {
     this.roomId = roomId;
@@ -18,6 +29,11 @@ class Room {
 
     this.turnOrder = []; // 턴 순서 (socketId 배열)
     this.currentTurnIndex = 0;
+
+    // 공격 코스트 충전용 "라운드" 카운터 (2026-08-29). advanceTurn()이 턴 순서를 몇 칸
+    // 지나왔는지 누적하다가, turnOrder.length 만큼(= 전체 순서가 한 바퀴) 채워지면 그때
+    // 전원의 공격 코스트를 충전하고 이 값을 0으로 되돌립니다. (기절로 건너뛴 칸도 한 칸으로 셈)
+    this.turnStepCount = 0;
 
     // 카드 인스턴스에 고유 id를 붙이기 위한 카운터
     // (같은 카드 "화염구"를 여러 장 들고 있어도 서로 구분할 수 있어야 하기 때문)
@@ -46,25 +62,91 @@ class Room {
   }
 
   // 플레이어 추가
-  addPlayer(socketId, nickname) {
+  // token: 재접속(reconnect) 판별용 비밀 값 (재접속 처리, 2026-08-27 추가). 클라이언트가
+  // localStorage에 저장해뒀다가 재접속 시 다시 보내줌 - socket.id는 재연결마다 바뀌지만
+  // token은 브라우저에 남아있는 한 그대로라서, "같은 사람이 돌아왔다"를 판별하는 열쇠로 씀.
+  // 절대로 다른 플레이어에게 공개되면 안 됨(toPublicView()에 포함시키지 않도록 주의)
+  addPlayer(socketId, nickname, token) {
     this.players.push({
       socketId,
       nickname,
+      token,
+      connected: true, // 재접속 처리(2026-08-27): 지금 이 사람이 실제로 연결되어 있는지
       hp: 100,
       maxHp: 100,
       isAlive: true,
       hand: [], // { instanceId, cardId } 배열. 게임 시작 시 채워짐
       // 코스트는 "공격용"과 "방어용"이 서로 다른 자원 풀입니다 (전투 시스템 개편, 2026-08-25).
-      // 게임 시작 시 resetAllCosts()로 채워짐
-      attackCost: 0,
-      maxAttackCost: 3, // 매 턴 지급되는 공격 코스트 (지금은 전원 고정 3)
-      defenseCost: 0,
+      // - 방어 코스트: 매 턴 maxDefenseCost로 통째로 초기화됨 (안 쓰면 사라짐)
+      // - 공격 코스트: 개편(2026-08-28~29)으로 "초기화"가 아니라 "누적 + 라운드마다 소량 충전"으로 바뀜.
+      //   안 쓴 코스트는 이월되고, 전체 턴 순서가 한 바퀴 돌 때마다 전원에게 ATTACK_COST_RECHARGE_PER_TURN
+      //   (+ maxAttackCostBuff)만큼만 충전되며 MAX_COST_CAP을 넘지 않음. 게임 시작 시 값은 maxAttackCost.
+      attackCost: 0, // initCosts()에서 maxAttackCost로 채워짐
+      maxAttackCost: 3, // 게임 시작 시 지급되는 공격 코스트(기준값). 이후엔 이 값으로 리셋되는 게 아니라 위 설명대로 충전됨
+      defenseCost: 0, // 매 턴 maxDefenseCost로 초기화됨
       maxDefenseCost: 3, // 매 턴 지급되는 방어 코스트 (지금은 전원 고정 3)
       // 지속상태 목록 (8단계 Phase 2, 2026-08-26 추가) - { type, amount, remainingTurns }
       // type: stun(기절)/attackLock(공격봉쇄)/defenseLock(방어봉쇄)/dot(화상)/attackBuff/defBuff
       // 같은 type이 여러 개 동시에 쌓일 수 있음(필드 효과처럼 인스턴스별로 따로 관리)
       statuses: [],
+      // 손패 시스템 개편(2026-08-27): 손패가 이미 최대치(MAX_HAND_SIZE)일 때 새 카드를 뽑으면,
+      // 바로 손패에 넣는 대신 여기 잠깐 보관해두고 본인이 "어떤 카드와 바꿀지"(또는 안 바꿀지)
+      // 정할 때까지 기다립니다. { instanceId, cardId } | null
+      pendingSwapCard: null,
     });
+  }
+
+  // token으로 플레이어 찾기 (재접속 시 "이 사람이 누구였는지" 알아낼 때 씀)
+  findPlayerByToken(token) {
+    if (!token) return null;
+    return this.players.find((p) => p.token === token) || null;
+  }
+
+  // 연결이 끊긴 것으로 표시만 함 (removePlayer처럼 배열에서 빼지는 않음 - 손패/HP/턴 순서를
+  // 그대로 보존해뒀다가 재접속하면 이어서 할 수 있도록). 방어 대기 등은 건드리지 않고, 호출하는
+  // 쪽(roomHandlers.js)이 유예시간 타이머를 관리함
+  markDisconnected(socketId) {
+    const player = this.getPlayer(socketId);
+    if (player) player.connected = false;
+  }
+
+  markConnected(socketId) {
+    const player = this.getPlayer(socketId);
+    if (player) player.connected = true;
+  }
+
+  // 재접속 성공 시: 예전 socket.id를 가리키던 모든 자리를 새 socket.id로 바꿔치기.
+  // socket.id는 연결마다 새로 발급되는 값이라, 재접속하면 이 방 상태 곳곳(턴 순서, 방장,
+  // 진행 중인 공격/방어 대상)에 남아있는 "옛 주소"를 전부 "새 주소"로 갱신해줘야 함
+  reassignSocketId(oldSocketId, newSocketId) {
+    const player = this.getPlayer(oldSocketId);
+    if (!player) return null;
+    player.socketId = newSocketId;
+    player.connected = true;
+
+    if (this.hostSocketId === oldSocketId) this.hostSocketId = newSocketId;
+
+    this.turnOrder = this.turnOrder.map((id) => (id === oldSocketId ? newSocketId : id));
+
+    if (this.pendingDefense) {
+      if (this.pendingDefense.attackerSocketId === oldSocketId) {
+        this.pendingDefense.attackerSocketId = newSocketId;
+      }
+      if (this.pendingDefense.defenderSocketId === oldSocketId) {
+        this.pendingDefense.defenderSocketId = newSocketId;
+      }
+    }
+
+    if (this.pendingMultiTarget) {
+      if (this.pendingMultiTarget.attackerSocketId === oldSocketId) {
+        this.pendingMultiTarget.attackerSocketId = newSocketId;
+      }
+      this.pendingMultiTarget.remainingTargets = this.pendingMultiTarget.remainingTargets.map((id) =>
+        id === oldSocketId ? newSocketId : id
+      );
+    }
+
+    return player;
   }
 
   // 플레이어 제거 (나가기/연결끊김)
@@ -87,21 +169,68 @@ class Room {
     // (나중에 셔플하고 싶으면 여기서 배열을 섞으면 됩니다)
     this.turnOrder = this.players.map((p) => p.socketId);
     this.currentTurnIndex = 0;
-    this.resetAllCosts();
+    this.turnStepCount = 0;
+    this.initCosts();
   }
 
-  // 전원의 공격/방어 코스트를 각각의 max값으로 리셋.
-  // 설계 결정: "턴이 바뀔 때마다" 리셋하되, "지금 턴인 사람만"이 아니라 "전원"을 리셋합니다.
-  // - 방어 코스트: 방어는 자기 턴이 아닐 때도 발생하므로, 상대 턴에 방어할 때도 이번 턴에 채워진
-  //   방어 코스트를 쓸 수 있어야 합니다.
-  // - 공격 코스트: 어차피 공격은 자기 턴에만 쓸 수 있어서(게임 로직상 막혀있음) 전원을 리셋해도
-  //   무해하고, 로직을 하나로 통일할 수 있어 더 단순합니다.
-  // 8단계 Phase 3(2026-08-26): 정기서린땅 등으로 얻은 maxAttackCostBuff 상태가 있으면
-  // 기본 maxAttackCost에 더해서 채워줌 (base 값 자체는 건드리지 않고, 매번 다시 계산함)
-  resetAllCosts() {
+  // ---- 다시 시작 (재시작 기능, 2026-08-27) ----
+  // 게임이 끝난 뒤 같은 방(같은 플레이어들)으로 새 게임을 하고 싶을 때 씀. 대기실 상태로
+  // 되돌리고 방/플레이어 목록은 그대로 둔 채, 지난 게임에서 쌓인 상태(HP, 손패, 코스트, 지속상태,
+  // 필드, 턴 순서 등)만 전부 처음 값으로 리셋합니다. 이후 startGame()을 다시 호출하면
+  // (gameHandlers.js의 game:start가 그대로 재사용됨) 새 덱을 셔플해서 손패를 새로 나눠줍니다.
+  resetForNewGame() {
+    this.status = "waiting";
+    this.turnOrder = [];
+    this.currentTurnIndex = 0;
+    this.turnStepCount = 0;
+    this.pendingDefense = null;
+    this.pendingMultiTarget = null;
+    this.terrain = null;
+    this.effects = [];
+    this.deck = [];
+    this.winnerNickname = null;
+
     this.players.forEach((p) => {
-      p.attackCost = p.maxAttackCost + this.getStatusTotal(p.socketId, "maxAttackCostBuff");
-      p.defenseCost = p.maxDefenseCost;
+      p.hp = p.maxHp;
+      p.isAlive = true;
+      p.hand = [];
+      p.statuses = [];
+      p.pendingSwapCard = null;
+      p.attackCost = 0;
+      p.maxAttackCost = 3;
+      p.defenseCost = 0;
+      p.maxDefenseCost = 3;
+    });
+  }
+
+  // 게임 시작 시 전원의 코스트를 기준값(maxAttackCost / maxDefenseCost)으로 채움.
+  // startGame()에서 한 번만 호출됩니다. 이후 턴마다의 처리는 resetDefenseCostsForNewTurn()과
+  // rechargeAttackCostsForRound()가 담당합니다.
+  initCosts() {
+    this.players.forEach((p) => {
+      p.attackCost = Math.min(MAX_COST_CAP, p.maxAttackCost);
+      p.defenseCost = Math.min(MAX_COST_CAP, p.maxDefenseCost);
+    });
+  }
+
+  // 매 턴 전환마다 advanceTurn()에서 호출 — 방어 코스트만 "전원" maxDefenseCost로 통째로
+  // 초기화합니다. 방어는 자기 턴이 아닐 때도 발생하므로, 상대 턴에 방어할 때도 이번 턴에 채워진
+  // 방어 코스트를 쓸 수 있어야 하기 때문입니다. (공격 코스트는 여기서 건드리지 않습니다.)
+  resetDefenseCostsForNewTurn() {
+    this.players.forEach((p) => {
+      p.defenseCost = Math.min(MAX_COST_CAP, p.maxDefenseCost);
+    });
+  }
+
+  // 전체 턴 순서가 한 바퀴 돈 뒤에만 advanceTurn()에서 호출 (2026-08-29 변경).
+  // 예전(2026-08-28)에는 "자기 턴이 시작될 때 그 사람만" 충전했지만, 이제는 한 라운드가 끝나는
+  // 시점에 "전원 동시에" ATTACK_COST_RECHARGE_PER_TURN(+ 각자의 maxAttackCostBuff 합계)만큼
+  // 충전합니다. 안 쓴 공격 코스트는 다음 라운드로 이월되며 MAX_COST_CAP을 넘지 않습니다.
+  rechargeAttackCostsForRound() {
+    this.players.forEach((p) => {
+      const amount =
+        ATTACK_COST_RECHARGE_PER_TURN + this.getStatusTotal(p.socketId, "maxAttackCostBuff");
+      p.attackCost = Math.min(MAX_COST_CAP, p.attackCost + amount);
     });
   }
 
@@ -155,7 +284,18 @@ class Room {
       }
 
       this.currentTurnIndex = nextIndex;
-      this.resetAllCosts();
+
+      // 방어 코스트는 매 턴 전원 리셋 (기존과 동일)
+      this.resetDefenseCostsForNewTurn();
+
+      // 공격 코스트는 "전체 순서가 한 바퀴 돈" 뒤에만 전원 충전 (2026-08-29 변경).
+      // 이번 advanceTurn이 턴 순서에서 몇 칸(i+1, 건너뛴 칸 포함) 지나왔는지 누적하다가,
+      // total(turnOrder 길이)만큼 채워지면 한 라운드가 끝난 것으로 보고 전원 충전 후 0으로 되돌림.
+      this.turnStepCount += i + 1;
+      if (this.turnStepCount >= total) {
+        this.turnStepCount %= total; // 건너뜀 때문에 딱 안 떨어지고 넘칠 수 있어 나머지는 이월
+        this.rechargeAttackCostsForRound();
+      }
       return skipped;
     }
     return skipped; // 전원이 죽었거나 기절 상태인 극단적인 경우 (기존에도 처리 안 하던 엣지케이스)
@@ -204,6 +344,37 @@ class Room {
     const card = { instanceId: `${cardId}-${this._nextInstanceId()}`, cardId };
     player.hand.push(card);
     return card;
+  }
+
+  // 손패 시스템 개편(2026-08-27): 손패가 이미 가득 찼을 때(MAX_HAND_SIZE) 카드를 뽑으면 바로
+  // 손패에 넣지 않고 pendingSwapCard에 잠깐 보관해둠. drawCardForPlayer와 거의 똑같지만
+  // "손패에 push" 대신 "pendingSwapCard에 저장"만 다름
+  drawCardToPending(socketId) {
+    if (this.deck.length === 0) return null;
+    const player = this.getPlayer(socketId);
+    if (!player) return null;
+    const cardId = this.deck.pop();
+    const card = { instanceId: `${cardId}-${this._nextInstanceId()}`, cardId };
+    player.pendingSwapCard = card;
+    return card;
+  }
+
+  // pendingSwapCard에 대한 본인의 결정을 반영함.
+  // replaceInstanceId가 있으면: 손패에서 그 카드를 빼고 그 자리에 pendingSwapCard를 넣음(교체).
+  // replaceInstanceId가 없으면(변경하지 않음): 그냥 pendingSwapCard를 버림 - 손패는 그대로 유지.
+  // 성공적으로 처리됐으면 true, pendingSwapCard가 없었거나 instanceId를 못 찾았으면 false
+  resolveHandSwap(socketId, replaceInstanceId) {
+    const player = this.getPlayer(socketId);
+    if (!player || !player.pendingSwapCard) return false;
+
+    if (replaceInstanceId) {
+      const index = player.hand.findIndex((c) => c.instanceId === replaceInstanceId);
+      if (index === -1) return false; // 잘못된 instanceId - 제안은 그대로 두고 아무 일도 안 함
+      player.hand.splice(index, 1, player.pendingSwapCard);
+    }
+
+    player.pendingSwapCard = null;
+    return true;
   }
 
   // ---- 방어 대기 상태 관리 ----
@@ -400,6 +571,7 @@ class Room {
       players: this.players.map((p) => ({
         socketId: p.socketId,
         nickname: p.nickname,
+        connected: p.connected, // 재접속 처리(2026-08-27): 잠깐 끊긴 상태면 false - 다른 사람 화면에 배지로 표시됨
         hp: p.hp,
         maxHp: p.maxHp,
         isAlive: p.isAlive,
@@ -407,16 +579,21 @@ class Room {
         handCount: p.hand.length,
         // 코스트는 대부분의 카드 게임에서 마나처럼 공개 정보이므로 그대로 노출
         attackCost: p.attackCost,
-        // maxAttackCostBuff 등으로 실제로 늘어난 값을 그대로 노출 (8단계 Phase 3, 2026-08-26)
-        // - 안 그러면 클라이언트 코스트 점(pip) 렌더링이 attackCost > maxAttackCost로 어긋남
-        maxAttackCost: p.maxAttackCost + this.getStatusTotal(p.socketId, "maxAttackCostBuff"),
+        // 공격 코스트는 개편(2026-08-28~29)으로 라운드마다 쌓일 수 있음(최대 MAX_COST_CAP). pip 개수로는
+        // "현재 보유량"과 기준값(maxAttackCost) 중 큰 쪽을 씀 - 쌓인 코스트가 다 보이면서도,
+        // 다 썼을 땐 최소 기준값(3)만큼의 빈 pip이 남아 레이아웃이 덜 흔들림.
+        // maxAttackCostBuff(정기서린땅)는 이제 "충전량"을 늘리는 것이지 상한을 늘리는 게 아니라 여기 안 더함
+        maxAttackCost: Math.min(MAX_COST_CAP, Math.max(p.attackCost, p.maxAttackCost)),
         defenseCost: p.defenseCost,
-        maxDefenseCost: p.maxDefenseCost,
+        maxDefenseCost: Math.min(MAX_COST_CAP, p.maxDefenseCost),
         // 지속상태(기절/봉쇄/화상/버프)도 전원에게 공개되는 정보 (8단계 Phase 2, 2026-08-26)
         statuses: p.statuses.map((s) => ({ type: s.type, amount: s.amount, remainingTurns: s.remainingTurns })),
       })),
       // 게임 중일 때만 의미있는 값이지만, 항상 같이 내려줘도 무방
       currentTurnSocketId: this.status === "playing" ? this.getCurrentTurnSocketId() : null,
+      // 게임 종료 후 재접속한 사람도 결과를 알 수 있도록 (재접속 처리, 2026-08-27) - status가
+      // "ended"가 아니면 항상 null
+      winnerNickname: this.status === "ended" ? this.winnerNickname || null : null,
       // 공격 카드는 이미 공개적으로 사용된 것이므로 누가 누구를 공격 중인지는 전원에게 공개
       pendingDefense: this.pendingDefense,
       // 필드 상태도 전원에게 공평하게 적용되는 공개 정보
@@ -429,6 +606,11 @@ class Room {
         // 카드 설명을 그대로 보여줘서, 종류가 늘어도 클라이언트가 문구를 직접 조립할 필요가 없게 함
         // (8단계 Phase 3, 2026-08-26)
         description: e.description,
+        // 클라이언트가 손패 카드의 "현재 코스트/위력 변동분"을 직접 계산해 금색으로 표시하기 위해
+        // 필요한 값들 (2026-08-29). 해당 효과가 아니면 0
+        element: e.element,
+        damageBonusAmount: e.damageBonusAmount || 0,
+        costReductionAmount: e.costReductionAmount || 0,
       })),
     };
   }

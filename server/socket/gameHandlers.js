@@ -2,7 +2,11 @@
 // "게임 진행(턴)"과 관련된 Socket.io 이벤트를 처리합니다.
 // 방 생성/입장은 roomHandlers.js가 담당하고, 여기서는 게임이 시작된 이후만 다룹니다.
 
-const { rooms } = require("./roomHandlers");
+// rooms Map은 roomHandlers.js가 아니라 roomStore.js에서 가져옵니다 (재접속 처리, 2026-08-27).
+// roomHandlers.js가 재접속 시 턴을 강제로 넘기기 위해 이 파일의 advanceTurnAndTick/finalizeDefense를
+// 가져다 써야 하는데, 만약 여기서 roomHandlers.js를 require하면 두 파일이 서로를 참조하는
+// "순환 참조"가 됩니다. rooms Map만 별도 파일(roomStore.js)로 빼서 순환을 피했습니다.
+const { rooms } = require("../game/roomStore");
 const { isCounter, GENERATE_MAP } = require("../game/elementTable");
 
 // 카드 정의 데이터 (Spring Boot로 치면 application.yml에 둔 고정 마스터 데이터를
@@ -13,18 +17,59 @@ cardPool.forEach((card) => {
   cardsById[card.id] = card;
 });
 
-const HAND_SIZE = 5; // 손패 상한 (임시 수치, 나중에 조정 가능)
-const COPIES_PER_CARD = 6; // 카드 한 종류당 덱에 몇 장씩 들어가는지 (임시 수치)
+// 손패 시스템 개편(2026-08-27): 처음엔 5장으로 시작해서, 자기 턴이 끝날 때마다 한 장씩 뽑아
+// 손패가 점점 늘어납니다(예전처럼 "카드를 쓸 때마다 그 자리를 바로 채우는" 방식은 폐기).
+// MAX_HAND_SIZE에 도달한 뒤에 또 뽑으면, 그냥 넘치는 대신 손패 중 하나와 바꿀지 물어봅니다.
+const STARTING_HAND_SIZE = 5;
+const MAX_HAND_SIZE = 9;
+
+// 코스트별 덱 복사 매수 (2026-08-29). 예전엔 모든 카드가 6장씩 똑같이 들어갔지만, 이제는 낮은
+// 코스트일수록 자주, 높은 코스트일수록 드물게 뽑히도록 가중치를 줍니다. 같은 코스트 카드가 여러
+// 종류여도 "카드 한 장당" 이 매수가 들어가므로, 특정 1코스트 카드와 특정 5코스트 카드가 뽑힐
+// 확률의 비율이 대략 10 : 1이 됩니다 (개발자 요청 — "너무 안 뜨는 건 안 되니 10/1 정도").
+// 지형(코스트 0)·효과(코스트 3)도 각자 코스트의 가중치를 그대로 따릅니다.
+const COPIES_BY_COST = {
+  0: 5, // 지형
+  1: 10,
+  2: 8,
+  3: 5, // 3코스트 공격/방어 + 효과 카드 전부
+  4: 3,
+  5: 1,
+};
+const DEFAULT_COPIES = 5; // COPIES_BY_COST에 없는 코스트가 나중에 생기면 쓰는 기본값
+
+function copiesForCard(card) {
+  const n = COPIES_BY_COST[card.cost];
+  return n == null ? DEFAULT_COPIES : n;
+}
 
 // 방어 속성이 공격 속성을 상극(카운터)할 때 방어력에 더해주는 고정 보너스
 // (전투 시스템 개편, 2026-08-25 — combat_mechanic_update_prompt.md 기준, 개발자와 상의해서 +5로 확정)
 const COUNTER_BONUS = 5;
 
-// 카드 id로 이루어진 덱을 하나 만들고 섞어서 반환 (Fisher-Yates 셔플)
+// ---- 카드 위력 랜덤 굴림 (2026-08-29) ----
+// 모든 공격/방어 카드는 이제 고정값이 아니라 범위(attackPowerMin~Max / defensePowerMin~Max)를
+// 가지며, "쓸 때마다" 서버가 그 범위 안에서 새로 하나를 굴립니다(주사위 느낌). 기존 카드는
+// 원래 수치 ±1, 신규 저코스트 카드는 1코스트 2~5 / 2코스트 6~9 (cards.json 참고).
+// min/max가 없는 옛 데이터가 섞여 있어도 죽지 않도록, 없으면 기존 고정값으로 폴백합니다.
+function rollInt(min, max) {
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+// kind: "attack" | "defense"
+function rollCardPower(card, kind) {
+  const min = card[`${kind}PowerMin`];
+  const max = card[`${kind}PowerMax`];
+  if (min == null || max == null) return card[`${kind}Power`] || 0;
+  return rollInt(Math.max(1, min), Math.max(1, max));
+}
+
+// 카드 id로 이루어진 덱을 하나 만들고 섞어서 반환 (Fisher-Yates 셔플).
+// 카드마다 코스트에 따라 다른 매수를 넣어서, 싼 카드가 자주·비싼 카드가 드물게 뽑히게 함 (2026-08-29)
 function buildShuffledDeck() {
   const deck = [];
   cardPool.forEach((card) => {
-    for (let i = 0; i < COPIES_PER_CARD; i++) {
+    const copies = copiesForCard(card);
+    for (let i = 0; i < copies; i++) {
       deck.push(card.id);
     }
   });
@@ -35,13 +80,14 @@ function buildShuffledDeck() {
   return deck;
 }
 
-// 방에 있는 모든 플레이어에게 덱에서 카드를 HAND_SIZE장씩 랜덤 분배.
-// 다 나눠주고 남은 카드는 room.deck에 저장해서, 이후 카드를 쓸 때마다 거기서 한 장씩 뽑아 씀
+// 방에 있는 모든 플레이어에게 덱에서 카드를 STARTING_HAND_SIZE장씩 랜덤 분배.
+// 다 나눠주고 남은 카드는 room.deck에 저장해둠 (손패 시스템 개편, 2026-08-27: 이후로는 카드를
+// 써도 바로 안 채워지고, 각자 자기 턴이 끝날 때 한 장씩만 뽑음 - handleEndOfTurnDraw 참고)
 function dealHandsToRoom(room) {
   const deck = buildShuffledDeck();
   room.players.forEach((player) => {
     const cardIds = [];
-    for (let i = 0; i < HAND_SIZE; i++) {
+    for (let i = 0; i < STARTING_HAND_SIZE; i++) {
       cardIds.push(deck.pop());
     }
     room.setHand(player.socketId, cardIds);
@@ -49,13 +95,32 @@ function dealHandsToRoom(room) {
   room.setDeck(deck);
 }
 
-// 카드를 한 장 사용해서 손패가 줄어들었을 때, 덱에서 한 장을 뽑아 채워줌 (손패 항상 5장 유지, 6단계)
-// 덱이 바닥나면 새로 셔플해서 다시 채움 - 게임이 카드 부족으로 멈추지 않도록 함
-function drawReplacementCard(room, socketId) {
+// 자기 턴을 끝내는 사람이 카드를 한 장 뽑음 (손패 시스템 개편, 2026-08-27).
+// - 손패가 아직 MAX_HAND_SIZE 미만이면: 그냥 손패에 추가하고 본인에게 game:handUpdated로 알림
+// - 손패가 이미 MAX_HAND_SIZE라면: 바로 넣지 않고 pendingSwapCard에 담아둔 뒤, 본인에게만
+//   game:handSwapOffered로 "어떤 카드와 바꿀지" 물어봄 (게임을 막지는 않음 - 턴은 그대로 넘어가고,
+//   본인이 원할 때 game:resolveHandSwap으로 나중에 답해도 됨)
+// - 만약 아직 답을 안 한 pendingSwapCard가 이미 있다면(그 사이 자기 턴이 또 돌아온 경우): 한 번에
+//   하나만 처리하도록, 이번 턴엔 그냥 드로우를 건너뜀 (카드가 두 장 겹쳐서 밀리는 걸 방지)
+function handleEndOfTurnDraw(io, room, socketId) {
+  const player = room.getPlayer(socketId);
+  if (!player || player.pendingSwapCard) return;
+
   if (room.deck.length === 0) {
     room.setDeck(buildShuffledDeck());
   }
-  room.drawCardForPlayer(socketId);
+
+  if (player.hand.length >= MAX_HAND_SIZE) {
+    const card = room.drawCardToPending(socketId);
+    if (!card) return;
+    io.to(socketId).emit("game:handSwapOffered", {
+      card: { instanceId: card.instanceId, ...cardsById[card.cardId] },
+    });
+  } else {
+    const card = room.drawCardForPlayer(socketId);
+    if (!card) return;
+    sendHandUpdate(io, room, socketId);
+  }
 }
 
 // 지형 감면 + 필드효과 감면(예: 청량한안개) - 상대가 걸어둔 코스트 증가(costUp 상태, 예: 얽힌덤불)
@@ -89,6 +154,13 @@ function sendHandUpdate(io, room, socketId) {
   io.to(socketId).emit("game:handUpdated", { hand: getHandView(room, socketId) });
 }
 
+// 방의 모든 플레이어에게 손패를 다시 보냄. 지형/필드효과 카드로 "남의 카드 코스트"가 바뀌는 경우
+// (얽힌덤불로 상대 코스트 증가, 코스트 감소 지형/안개 등), 그 상대들의 손패에 실린 effectiveCost도
+// 같이 최신으로 맞춰줘야 클라이언트가 코스트를 금색으로 정확히 표시할 수 있음 (2026-08-29)
+function broadcastHands(io, room) {
+  room.players.forEach((p) => sendHandUpdate(io, room, p.socketId));
+}
+
 // 생존자가 1명 이하로 남았는지 확인하고, 그렇다면 게임을 종료 처리 + game:over 방송.
 // 전투 종료 시점(resolveCombat)과 효과 카드 틱(game:endTurn) 양쪽에서 공통으로 씀.
 // 게임이 끝났으면 true, 아니면 false를 반환
@@ -99,9 +171,13 @@ function maybeEndGame(io, roomId, room) {
 
   room.status = "ended";
   const winner = alivePlayers[0] || null;
+  // 게임 종료 후 재접속하는 사람도 결과를 볼 수 있도록 Room에도 남겨둠 (재접속 처리, 2026-08-27)
+  // - game:over는 "그 순간 연결되어 있던 사람들"에게만 한 번 방송되는 이벤트라, 나중에 재접속한
+  //   사람은 이 이벤트를 놓치므로 toPublicView()로도 알 수 있게 함
+  room.winnerNickname = winner ? winner.nickname : null;
   io.to(roomId).emit("game:over", {
     winnerSocketId: winner ? winner.socketId : null,
-    winnerNickname: winner ? winner.nickname : null,
+    winnerNickname: room.winnerNickname,
   });
   return true;
 }
@@ -142,6 +218,32 @@ function beginAttackOnTarget(io, roomId, room, attackInfo, targetSocketId) {
     attackPower: attackInfo.attackPower,
     attackTerrainBonus: attackInfo.attackTerrainBonus,
     attackEffectBonus: attackInfo.attackEffectBonus || 0,
+  });
+}
+
+// 재접속한 사람이 하필 지금 막 공격을 받아서 방어를 기다리던 중이었다면(연결이 끊기기 전에
+// game:defenseRequest를 받아놓고 아직 응답하지 못한 상태), 새로고침한 화면은 그 사실을 전혀
+// 모르는 채로 시작하므로 defenseRequest를 다시 한번 보내줘야 "방어하세요" 배너와 손패의 방어
+// 카드 강조 표시가 다시 뜹니다 (재접속 처리, 2026-08-27. roomHandlers.js의 room:rejoin에서 호출)
+function resendDefenseRequestIfPending(io, room, socketId) {
+  if (!room.pendingDefense || room.pendingDefense.defenderSocketId !== socketId) return;
+
+  const { attackerSocketId, cardId, cost, element, attackPower, attackTerrainBonus, attackEffectBonus } =
+    room.pendingDefense;
+  const attacker = room.getPlayer(attackerSocketId);
+  const card = cardsById[cardId];
+  if (!attacker || !card) return;
+
+  io.to(socketId).emit("game:defenseRequest", {
+    attackerSocketId,
+    attackerNickname: attacker.nickname,
+    cardId,
+    cardName: card.name,
+    cost,
+    element,
+    attackPower,
+    attackTerrainBonus,
+    attackEffectBonus: attackEffectBonus || 0,
   });
 }
 
@@ -300,6 +402,18 @@ function finalizeDefense(io, roomId, room) {
     io.to(roomId).emit("room:updated", room.toPublicView());
   }
 
+  // 안전장치(재접속 처리, 2026-08-27): 방금 방어가 확정된 뒤에도 여전히 "공격자의 턴"인데,
+  // 그 공격자가 이미 방을 완전히 나간 상태라면(방어를 기다리는 동안 재접속 유예시간이 끝나
+  // 강제 퇴장당한 경우) 아무도 그 턴을 끝내줄 방법이 없어 게임이 멈춰버립니다. 그런 경우를
+  // 대비해 자동으로 다음 턴으로 넘겨줍니다 (위 attackerSocketId 사망 케이스와 별개의 경로임 -
+  // 이번엔 공격자가 죽은 게 아니라 그냥 연결이 끊긴 채로 완전히 제거된 경우).
+  // !room.pendingDefense 조건이 꼭 필요함: 다중 대상 공격이라 바로 위에서 다음 대상에게 이어졌다면
+  // (hasMoreMultiTargets) 새 pendingDefense가 막 세팅된 상태라, 지금 턴을 넘기면 "방어 대기 중엔
+  // 턴 종료 불가" 규칙이 깨짐 - 그 시퀀스가 완전히 끝난 뒤(pendingDefense가 다시 비워진 뒤)에만 넘김
+  if (!ended && !room.pendingDefense && !room.getPlayer(room.getCurrentTurnSocketId())) {
+    advanceTurnAndTick(io, roomId, room);
+  }
+
   console.log(
     `[전투 결과] 방 ${roomId}, ${attackerSocketId} -> ${defenderSocketId}, ` +
       `방어카드 ${appliedDefenses.length}장, 피해=${damageDealt}`
@@ -344,6 +458,31 @@ function registerGameHandlers(io, socket) {
     console.log(`[게임 시작] 방 ${roomId}, 첫 턴: ${room.getCurrentTurnSocketId()}`);
   });
 
+  // ---- 다시 시작 (방장만, 게임이 끝난 뒤에만 가능) ----
+  // 게임 종료 화면의 "다시 시작" 버튼에서 호출됨. 방을 대기실 상태로 되돌리기만 하고, 실제 게임
+  // 시작은 (새로 들어오거나 나간 사람이 있을 수 있으니) 방장이 game:start를 다시 눌러야 함 -
+  // 그래야 기존 "게임 시작" 흐름(2명 이상 체크, 손패 분배 등)을 그대로 재사용할 수 있음
+  socket.on("game:playAgain", ({ roomId }) => {
+    const room = rooms.get(roomId);
+
+    if (!room) {
+      socket.emit("error", { code: "ROOM_NOT_FOUND", message: "존재하지 않는 방입니다." });
+      return;
+    }
+    if (room.hostSocketId !== socket.id) {
+      socket.emit("error", { code: "NOT_HOST", message: "방장만 다시 시작할 수 있습니다." });
+      return;
+    }
+    if (room.status !== "ended") {
+      socket.emit("error", { code: "GAME_NOT_ENDED", message: "게임이 끝난 뒤에만 다시 시작할 수 있습니다." });
+      return;
+    }
+
+    room.resetForNewGame();
+    io.to(roomId).emit("room:updated", room.toPublicView());
+    console.log(`[다시 시작] 방 ${roomId} -> 대기실로 복귀`);
+  });
+
   // ---- 턴 종료 (현재 턴인 사람만 가능) ----
   socket.on("game:endTurn", ({ roomId }) => {
     const room = rooms.get(roomId);
@@ -368,7 +507,23 @@ function registerGameHandlers(io, socket) {
       return;
     }
 
+    // 손패 시스템 개편(2026-08-27): 자기 턴을 끝내면 카드를 한 장 뽑음. 턴을 넘기기 "전"에
+    // 뽑아야 아직 살아있는(turnOrder에 남아있는) 본인 socketId로 정확히 처리됨
+    handleEndOfTurnDraw(io, room, socket.id);
     advanceTurnAndTick(io, roomId, room);
+  });
+
+  // ---- 손패 교체(pendingSwapCard) 결정: 바꿀 카드를 골랐으면 replaceInstanceId를 보내고,
+  // 안 바꾸기로 했으면 null을 보냄 (손패 시스템 개편, 2026-08-27) ----
+  socket.on("game:resolveHandSwap", ({ roomId, replaceInstanceId }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    const player = room.getPlayer(socket.id);
+    if (!player || !player.pendingSwapCard) return; // 답할 게 없으면 조용히 무시
+
+    room.resolveHandSwap(socket.id, replaceInstanceId);
+    sendHandUpdate(io, room, socket.id);
   });
 
   // ---- 공격 카드 사용 (현재 턴인 사람만, 방어 대기 중이 아닐 때만) ----
@@ -447,7 +602,7 @@ function registerGameHandlers(io, socket) {
 
     room.removeCardFromHand(socket.id, cardInstanceId);
     room.spendAttackCost(socket.id, effectiveCost);
-    drawReplacementCard(room, socket.id); // 쓴 카드만큼 덱에서 한 장 보충 (손패 항상 5장 유지)
+    // 손패 시스템 개편(2026-08-27): 카드를 썼다고 바로 보충하지 않음 - 자기 턴이 끝날 때 한 장씩만 뽑음
     sendHandUpdate(io, room, socket.id);
 
     // 필드에 깔린 지형이 이 카드의 속성을 상생하면 공격력에 보너스가 붙음 (5단계, 2026-08-25)
@@ -456,7 +611,10 @@ function registerGameHandlers(io, socket) {
     const attackBuffTotal = room.getStatusTotal(socket.id, "attackBuff");
     // 필드효과(작열의기운 등)가 같은 속성 공격 카드에 주는 피해 보너스 (8단계 Phase 3, 2026-08-26)
     const attackEffectBonus = room.getEffectDamageBonus(card.element);
-    const effectiveAttackPower = card.attackPower + attackTerrainBonus + attackBuffTotal + attackEffectBonus;
+    // 카드 기본 공격력을 지금 이 사용 시점에 새로 굴림 (2026-08-29). 다중 대상 카드는 한 번의
+    // 사용이므로 여기서 한 번만 굴려서 모든 대상에게 같은 값을 씀
+    const rolledAttackPower = rollCardPower(card, "attack");
+    const effectiveAttackPower = rolledAttackPower + attackTerrainBonus + attackBuffTotal + attackEffectBonus;
 
     // 카드 사용 즉시 고정 회복되는 카드(치유의파동/해일 등) - 피해량과 무관하게 지금 바로 적용
     // (8단계 Phase 1, 2026-08-26)
@@ -580,19 +738,22 @@ function registerGameHandlers(io, socket) {
     resolvedCards.forEach(({ instanceId, card, effectiveCost }) => {
       room.removeCardFromHand(socket.id, instanceId);
       room.spendDefenseCost(socket.id, effectiveCost);
-      drawReplacementCard(room, socket.id); // 쓴 카드만큼 덱에서 한 장 보충 (손패 항상 5장 유지)
+      // 손패 시스템 개편(2026-08-27): 카드를 썼다고 바로 보충하지 않음 - 자기 턴이 끝날 때 한 장씩만 뽑음
 
       const counterBonus = isCounter(card.element, attackInfo.element) ? COUNTER_BONUS : 0;
       const terrainBonus = room.getTerrainSynergyBonus(card.element);
       // 자신에게 걸려있는 방어력 버프 합산 (8단계 Phase 2, 2026-08-26)
       const defBuffTotal = room.getStatusTotal(socket.id, "defBuff");
-      const effectiveDefensePower = card.defensePower + counterBonus + terrainBonus + defBuffTotal;
+      // 카드 기본 방어력을 이 방어 시점에 새로 굴림 (2026-08-29). 방어 카드를 여러 장 냈으면
+      // 장마다 따로 굴림
+      const rolledDefensePower = rollCardPower(card, "defense");
+      const effectiveDefensePower = rolledDefensePower + counterBonus + terrainBonus + defBuffTotal;
 
       room.addAppliedDefense({
         cardId: card.id,
         cardName: card.name,
         element: card.element,
-        defensePower: card.defensePower,
+        defensePower: rolledDefensePower,
         counterBonus,
         terrainBonus,
         effectiveDefensePower,
@@ -650,7 +811,7 @@ function registerGameHandlers(io, socket) {
         cardName: card.name,
         cost: card.cost,
         element: card.element,
-        defensePower: card.defensePower,
+        defensePower: rolledDefensePower,
         counterBonus,
         terrainBonus,
         effectiveDefensePower,
@@ -719,7 +880,7 @@ function registerGameHandlers(io, socket) {
     }
 
     room.removeCardFromHand(socket.id, cardInstanceId);
-    drawReplacementCard(room, socket.id); // 쓴 카드만큼 덱에서 한 장 보충 (손패 항상 5장 유지)
+    // 손패 시스템 개편(2026-08-27): 카드를 썼다고 바로 보충하지 않음 - 자기 턴이 끝날 때 한 장씩만 뽑음
     sendHandUpdate(io, room, socket.id);
 
     // 지형이 상생하는 속성 (예: 화속성 지형 -> 화생토 -> 토속성이 강화됨). 로그/필드 표시줄에 보여주기 위해 미리 계산
@@ -779,9 +940,24 @@ function registerGameHandlers(io, socket) {
       durationTurns: card.type === "effect" ? card.durationTurns : undefined,
     });
     io.to(roomId).emit("room:updated", room.toPublicView());
+    // 코스트 감면/증가 지형·효과라면 다른 사람 손패의 effectiveCost도 바뀌므로 전원에게 다시 보냄
+    broadcastHands(io, room);
 
     console.log(`[필드 카드] 방 ${roomId}, ${player.nickname} -> ${card.name} (${card.type})`);
   });
 }
 
-module.exports = { registerGameHandlers };
+// advanceTurnAndTick/finalizeDefense는 roomHandlers.js가 재접속 유예시간이 끝났을 때
+// (그 사람 턴인데 계속 안 돌아오면 강제로 턴을 넘기고, 그 사람이 방어자인데 안 돌아오면
+// 무방비로 전액 피해 처리하기 위해) 재사용합니다. sendHandUpdate/resendDefenseRequestIfPending은
+// 재접속에 성공했을 때 손패와 "방어하세요" 요청을 다시 보내주기 위해, maybeEndGame은 유예시간이
+// 끝나 진짜로 내보낸 직후 "그 결과 생존자가 1명만 남았는지"를 다시 확인하기 위해 재사용합니다
+// (재접속 처리, 2026-08-27)
+module.exports = {
+  registerGameHandlers,
+  advanceTurnAndTick,
+  finalizeDefense,
+  sendHandUpdate,
+  maybeEndGame,
+  resendDefenseRequestIfPending,
+};

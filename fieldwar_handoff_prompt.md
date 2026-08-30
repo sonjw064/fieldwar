@@ -43,15 +43,20 @@
 
 ### 코스트 시스템 (2026-08-25, 전투 시스템 개편으로 갱신 — 아래 "코스트 매칭 방어" 방식은 폐기됨)
 - **코스트는 "행동 자원 풀"입니다.** 카드를 낼 수 있는지(자원이 충분한지)만 결정하고, 방어 성공 여부/데미지 계산에는 관여하지 않음
-- **공격 코스트 풀**과 **방어 코스트 풀**은 서로 다른 자원이며 독립적으로 관리됨. 기본 지급량은 각각 **3** (개발자와 상의해서 확정)
-  - 공격 코스트: 자기 턴에 지급, 그 풀 안에서 여러 번·여러 대상에게 공격 카드를 낼 수 있음 (예: 1코스트 카드 3번 / 3코스트 카드 1번 등 자유)
+- **공격 코스트 풀**과 **방어 코스트 풀**은 서로 다른 자원이며 독립적으로 관리됨. 시작값은 각각 **3** (충전/리셋 규칙은 아래 별도 항목 참고 — 공격은 누적형, 방어는 매턴 리셋)
+  - 공격 코스트: 그 풀 안에서 여러 번·여러 대상에게 공격 카드를 낼 수 있음 (예: 1코스트 카드 3번 / 3코스트 카드 1번 등 자유). 안 쓴 건 이월됨 (아래 "공격 코스트" 항목)
   - 방어 코스트: 방어자도 별도의 풀을 보유. 한 턴 동안 여러 번 공격받으면 그때마다 자신의 방어 코스트 풀에서 소모하며 대응 (집중 공격을 받으면 방어 코스트가 바닥날 수 있음)
   - 카드/필드 효과로 두 풀을 각각 증감시킬 수 있음 (나중에 확장 여지)
-- **안 쓴 코스트는 다음 턴으로 이월되지 않고 매턴 리셋됨** (공격/방어 풀 둘 다)
+- **방어 코스트**: 안 쓴 코스트는 이월되지 않고 매 턴 `maxDefenseCost`(3)로 통째로 리셋됨 (전원, 매 턴 전환마다 — 방어는 자기 턴이 아닐 때도 발생하므로)
+- **공격 코스트 (2026-08-28 누적형으로 개편 → 2026-08-29 라운드 단위로 조정)**: 더 이상 매 턴 리셋되지 않음. 게임 시작 시 3에서 출발해, **전체 턴 순서가 한 바퀴 돌 때마다 전원에게 동시에 +1씩만 충전**되고 안 쓴 코스트는 그대로 이월됨. 상한은 `MAX_COST_CAP`(7). 예(2인 기준, 한 라운드 = 2턴): 첫 턴에 3코스트 카드를 쓰면 다음 내 턴엔 1, 1코스트만 썼으면 3, 안 썼으면 4. 구현: `Room.js`의 옛 `resetAllCosts()`가 3개로 분리됨 — `initCosts()`(게임 시작 시 1회), `resetDefenseCostsForNewTurn()`(`advanceTurn()`에서 매 턴 전원 방어 코스트 리셋), `rechargeAttackCostsForRound()`(라운드 완성 시에만 전원 공격 코스트 +충전). 라운드 감지는 `this.turnStepCount`에 `advanceTurn`이 지나온 칸 수(`i+1`, 건너뛴 칸 포함)를 누적해 `turnOrder.length`에 도달하면 발동(나머지는 이월). 기절로 건너뛴 사람도 라운드가 끝나면 같이 충전됨. `ATTACK_COST_RECHARGE_PER_TURN = 1`
+  - `정기서린땅`(`maxAttackCostBuff` 상태)의 의미도 이 개편에 맞춰 조정: "최대 코스트 +1"이 아니라 **"라운드당 충전량 +1"**(효과 지속 동안 라운드마다 +2 충전). `toPublicView()`의 `maxAttackCost`(코스트 pip 개수)는 이제 `min(7, max(현재 attackCost, 3))` — 쌓인 코스트가 다 보이되 다 쓰면 최소 3칸 유지
 - (검토했다가 보류한 것: "방어 성공 시 코스트가 적립되어 다음 턴 코스트가 늘어난다"는 메커니즘은 일단 제외했음. 나중에 확장으로 재검토 가능)
 
 ### 카드 스탯: 공격력 / 방어력
 - 공격 카드는 **공격력**만, 방어 카드는 **방어력**만 가짐 (역할 분리). 공격력/방어력을 동시에 가지는 특수 카드는 나중에 추가될 수 있음 (지금은 데이터 구조상 두 필드를 다 가질 수 있게만 열어둠)
+- **2026-08-29 위력 랜덤화**: 모든 공격/방어 카드의 기본 공격력·방어력은 고정값이 아니라 **범위**(`attackPowerMin`/`attackPowerMax`, `defensePowerMin`/`defensePowerMax`)이며, **카드를 낼 때마다** 서버(`gameHandlers.js`의 `rollCardPower()`)가 그 안에서 새로 굴림. 기존 카드는 원래 수치 ±1, 신규 저코스트 카드는 1코스트 2~5 / 2코스트 6~9. `attackPower`/`defensePower` 고정 필드는 남겨두되 이제 "명목/폴백값"일 뿐이고, 실제 판정·연출·로그는 굴려진 값을 씀. 다중 대상 공격은 한 번의 사용이므로 한 번만 굴려 전 대상에 동일 적용, 방어 카드는 장마다 따로 굴림
+- **2026-08-29 저코스트 카드 20장 추가**: 속성별로 (공격 1 + 방어 1) × (1코스트·2코스트) = 20장. 전부 순수 수치 카드(특수효과 없음), id는 `atk_<el>_lo1`/`_lo2`·`def_<el>_lo1`/`_lo2`. 이로써 전체 카드 **90장**(공격 35·방어 35·지형 10·효과 10)
+- **2026-08-29 코스트별 덱 가중치**: 예전엔 모든 카드가 6장씩 균등하게 덱에 들어갔지만, 이제 `gameHandlers.js`의 `COPIES_BY_COST`(`{0:5, 1:10, 2:8, 3:5, 4:3, 5:1}`, 없는 코스트는 `DEFAULT_COPIES=5`)로 코스트가 낮을수록 여러 장 넣음. "카드 한 장당" 뽑힐 확률이 1코스트 : 5코스트 ≈ **10 : 1** (개발자 요청, "10/1 정도"). 지형(0)·효과(3)도 각자 코스트 가중치를 따름. 결과 덱 규모 ≈ 450장, 뽑기 분포는 대략 코스트0 11% / 1 22% / 2 18% / 3 33%(효과 10장 포함이라 큼) / 4 13% / 5 2%
 
 ### 데미지 계산 방식
 - 코스트는 "낼 수 있는가"만 결정, **실제 피해량은 공격력과 방어력의 수치 비교**로 계산
@@ -145,7 +150,7 @@ fieldwar/
    - 클라이언트: 현재 턴인 사람에게 "지금은 내 턴입니다" 표시, 본인 턴일 때만 "턴 종료" 버튼 활성화
 3. **카드 사용 → 방어 → HP 감소 흐름 (3단계, 2026-08-25 완료)**
    - `server/data/cards.json`: 공격 카드 3장(가시덩굴/화염구/해일), 방어 카드 3장(쇠사슬 방패/돌벽/물의 장막)
-   - `game:start` 시 카드 풀을 종류당 6장씩 복사한 덱을 셔플해서 각 플레이어에게 5장씩(`HAND_SIZE`) 랜덤 분배. 손패는 `game:handUpdated`로 본인에게만 개별 전송 (상대에게는 `handCount`만 공개)
+   - `game:start` 시 카드 풀을 코스트별 가중치(`COPIES_BY_COST`, 2026-08-29 — 아래 참고)만큼 복사한 덱을 셔플해서 각 플레이어에게 5장씩(`STARTING_HAND_SIZE`) 랜덤 분배. 손패는 `game:handUpdated`로 본인에게만 개별 전송 (상대에게는 `handCount`만 공개)
    - `game:playCard`: 자기 턴 + 방어 대기 중 아닐 때만 가능. 공격 카드를 손패에서 제거하고 `pendingDefense` 상태로 전환, 대상에게만 `game:defenseRequest` 전송
    - `game:defend` / `game:skipDefense`: 방어자만 가능. 포기하면 공격 카드의 공격력을 그대로 적용, 방어 성공 시 피해 0 (판정 규칙은 4단계에서 교체됨, 아래 참고) — **이 두 이벤트는 6단계에서 `game:confirmDefense`로 완전히 대체되어 현재는 존재하지 않음** (아래 "6단계 진행 상황" 및 이벤트 목록 참고)
    - `Room.applyDamage()`로 HP 차감 및 사망 처리(HP 0 → `isAlive: false`), `Room.getAlivePlayers()`로 생존자 1명 남으면 `game:over` 발동, `room.status`를 `ended`로 전환
@@ -257,13 +262,13 @@ fieldwar/
 
 **서버 → 클라이언트**
 - `room:created` `{ roomId }`
-- `room:updated` `{ roomId, hostSocketId, status, players[](hp/maxHp/isAlive/handCount/attackCost/maxAttackCost/defenseCost/maxDefenseCost/statuses[] 포함), currentTurnSocketId, pendingDefense, terrain, effects[] }` — `statuses[]`는 8단계 Phase 2·3에서 추가된 `{ type, amount, remainingTurns }[]` (type: stun/attackLock/defenseLock/dot/attackBuff/defBuff/damageReduction/costUp/maxAttackCostBuff). `maxAttackCost`는 8단계 Phase 3부터 `maxAttackCostBuff` 반영된 실제 값. `terrain`은 `costReduction`/`description` 필드 포함(Phase 3), `effects[]`도 각각 `description` 포함
+- `room:updated` `{ roomId, hostSocketId, status, players[](hp/maxHp/isAlive/handCount/attackCost/maxAttackCost/defenseCost/maxDefenseCost/statuses[] 포함), currentTurnSocketId, pendingDefense, terrain, effects[] }` — `statuses[]`는 8단계 Phase 2·3에서 추가된 `{ type, amount, remainingTurns }[]` (type: stun/attackLock/defenseLock/dot/attackBuff/defBuff/damageReduction/costUp/maxAttackCostBuff). `maxAttackCost`는 이제 코스트 pip 개수용으로 `min(7, max(현재 attackCost, 3))` (2026-08-29 공격 코스트 누적 개편). `terrain`은 `costReduction`/`description` 필드 포함, `effects[]`는 각각 `description` + **2026-08-29부터 `element`/`damageBonusAmount`/`costReductionAmount`** 포함 (클라가 손패 카드의 현재 코스트·위력 변동분을 직접 계산해 금색으로 표시하는 데 씀)
 - `game:turnChanged` `{ currentTurnSocketId }`
-- `game:handUpdated` `{ hand[] }` — 본인에게만 개별 전송 (instanceId + 카드 상세 정보 전부 + `effectiveCost`(8단계 Phase 3 신규 — 지형/필드효과 감면·코스트증가가 반영된 실제 코스트), 카드 타입에 따라 해당 필드만 의미 있음)
-- `game:attackAnnounced` `{ attackerSocketId, attackerNickname, defenderSocketId, defenderNickname, cardId, cardName, cost, element, attackPower, attackTerrainBonus, attackEffectBonus }` — **(6단계 신규, attackEffectBonus는 8단계 Phase 3)** 공격 카드를 냈을 때 **방 전체**에 방송(공격자/방어자뿐 아니라 구경하는 사람도 포함). 화면 중앙에 공격 카드를 띄우는 연출용. 다중 대상 카드(8단계 Phase 3)는 대상마다 한 번씩 순서대로 여러 번 방송됨
-- `game:defenseRequest` `{ attackerNickname, cardName, element, attackPower, attackTerrainBonus, attackEffectBonus }` — 방어 대상에게만 개별 전송. 안내 문구용(실제 방어 카드 선택은 손패에서 직접 함)
-- `game:defenseCardApplied` `{ defenderSocketId, cardId, cardName, cost, element, defensePower, counterBonus, terrainBonus, effectiveDefensePower, counterDamage, healOnDefend }` — **(6단계 신규, 8단계 Phase 1에서 counterDamage/healOnDefend 추가)** 방어자가 `game:confirmDefense`로 확정한 방어 카드 한 장마다 방 전체에 방송(여러 장이면 여러 번). 공격 카드 위에 겹쳐 쌓이는 연출용
-- `game:combatResult` `{ attackerSocketId, defenderSocketId, cardId, cardName, defended, attackPower, attackTerrainBonus, attackEffectBonus, appliedDefenses: [{ cardId, cardName, element, defensePower, counterBonus, terrainBonus, effectiveDefensePower, counterDamage, healOnDefend }], defensePowerUsed, armorPiercing, damageDealt, damageReductionApplied, hasMoreTargets, defenderHp, defenderIsAlive, attackerHp, attackerIsAlive, healOnUse, lifestealHeal, healOnDefend, counterDamage, appliedStatuses: [{ targetSocketId, type, amount, remainingTurns }] }` — 방 전체 방송. `appliedDefenses`는 이번 방어에 사용된 카드 전부(0장이면 빈 배열 = 무방비로 전부 피해). `armorPiercing`/`healOnUse`/`lifestealHeal`/`healOnDefend`/`counterDamage`는 8단계 Phase 1, `attackerHp`/`attackerIsAlive`/`appliedStatuses`는 Phase 2, `attackEffectBonus`/`damageReductionApplied`/`hasMoreTargets`는 Phase 3에서 추가됨. `hasMoreTargets`는 다중 대상 카드가 아직 다음 대상에게 이어질 예정이면 true(클라이언트가 연출을 안 끄고 이어가는 데 씀)
+- `game:handUpdated` `{ hand[] }` — 원칙적으로 본인에게만 개별 전송 (instanceId + 카드 상세 정보 전부 + `effectiveCost` = 지형/필드효과 감면·코스트증가가 반영된 실제 코스트 + `attackPowerMin/Max`·`defensePowerMin/Max` = 위력 범위). **2026-08-29부터 `game:playFieldCard` 처리 끝에는 `broadcastHands()`로 방의 전원에게** 다시 보냄 — 코스트 감면/증가 지형·효과로 남의 카드 `effectiveCost`도 바뀌기 때문
+- `game:attackAnnounced` `{ attackerSocketId, attackerNickname, defenderSocketId, defenderNickname, cardId, cardName, cost, element, attackPower, attackTerrainBonus, attackEffectBonus }` — **(6단계 신규, attackEffectBonus는 8단계 Phase 3)** 공격 카드를 냈을 때 **방 전체**에 방송(공격자/방어자뿐 아니라 구경하는 사람도 포함). 화면 중앙에 공격 카드를 띄우는 연출용. 다중 대상 카드(8단계 Phase 3)는 대상마다 한 번씩 순서대로 여러 번 방송됨. **2026-08-29부터 `attackPower`는 이번 사용에 굴려진 값 + 지형/버프/필드효과 보너스**(카드에 인쇄된 범위가 아님)
+- `game:defenseRequest` `{ attackerNickname, cardName, element, attackPower, attackTerrainBonus, attackEffectBonus }` — 방어 대상에게만 개별 전송. 안내 문구용(실제 방어 카드 선택은 손패에서 직접 함). `attackPower`는 위와 같이 굴려진 값. 클라는 이 `element`를 기억해뒀다가 방어 카드가 상극이면 방어력 표기를 금색으로 보정
+- `game:defenseCardApplied` `{ defenderSocketId, cardId, cardName, cost, element, defensePower, counterBonus, terrainBonus, effectiveDefensePower, counterDamage, healOnDefend }` — **(6단계 신규, 8단계 Phase 1에서 counterDamage/healOnDefend 추가)** 방어자가 `game:confirmDefense`로 확정한 방어 카드 한 장마다 방 전체에 방송(여러 장이면 여러 번). 공격 카드 위에 겹쳐 쌓이는 연출용. **2026-08-29부터 `defensePower`는 이번 방어에 카드별로 굴려진 값**(범위 아님)
+- `game:combatResult` `{ attackerSocketId, defenderSocketId, cardId, cardName, defended, attackPower, attackTerrainBonus, attackEffectBonus, appliedDefenses: [{ cardId, cardName, element, defensePower, counterBonus, terrainBonus, effectiveDefensePower, counterDamage, healOnDefend }], defensePowerUsed, armorPiercing, damageDealt, damageReductionApplied, hasMoreTargets, defenderHp, defenderIsAlive, attackerHp, attackerIsAlive, healOnUse, lifestealHeal, healOnDefend, counterDamage, appliedStatuses: [{ targetSocketId, type, amount, remainingTurns }] }` — 방 전체 방송. `attackPower`와 `appliedDefenses[].defensePower`는 이번 전투에 굴려진 값(2026-08-29). `appliedDefenses`는 이번 방어에 사용된 카드 전부(0장이면 빈 배열 = 무방비로 전부 피해). `armorPiercing`/`healOnUse`/`lifestealHeal`/`healOnDefend`/`counterDamage`는 8단계 Phase 1, `attackerHp`/`attackerIsAlive`/`appliedStatuses`는 Phase 2, `attackEffectBonus`/`damageReductionApplied`/`hasMoreTargets`는 Phase 3에서 추가됨. `hasMoreTargets`는 다중 대상 카드가 아직 다음 대상에게 이어질 예정이면 true(클라이언트가 연출을 안 끄고 이어가는 데 씀). 클라는 이 이벤트 뒤 중앙 카드가 사라진 다음 `damageDealt`(0이면 "방어함")를 화면 중앙에 큼직하게 잠깐 띄움(`#combatResultNumber`, 2026-08-29)
 - `game:fieldCardPlayed` `{ playerSocketId, playerNickname, cardId, cardName, fieldType, element, description, durationTurns }` — 필드 카드 사용 시 방 전체 방송. 8단계 Phase 3부터 `description`(카드 설명 그대로)만 보내고 클라이언트가 그걸 그대로 로그에 표시함(기존 `synergyBonus`/`boostedElement`/`tickDamage` 개별 필드는 제거 — 지형/효과 종류가 늘어날 때마다 클라이언트 분기가 늘어나는 걸 피하기 위한 리팩터링)
 - `game:effectsTicked` `{ effects: [{ cardId, cardName, tickDamage, affectedSocketIds }] }` — 턴 전환 시 필드 효과가 발동했을 때만 방송
 - `game:statusesTicked` `{ dotTicks: [{ socketId, nickname, damage, remainingTurns }] }` — **(8단계 Phase 2 신규)** 턴 전환 시 화상(DoT) 등 개인 지속상태가 발동했을 때만 방송
@@ -296,11 +301,18 @@ fieldwar/
 >    - ~~Phase 1: 즉시효과(관통/흡혈/고정회복/방어성공회복/반격) 4종~~
 >    - ~~Phase 2: 지속상태 인프라 + CC/DoT/버프·디버프 3종~~
 >    - ~~Phase 3: 다중 대상 공격/보호 + 코스트 증감 (+ 뒤늦게 발견한 작열의기운 필드효과 데미지 보너스까지 포함)~~
-> 9. **다음 우선순위 상의** ← 여기부터. 유력 후보:
->    - 남은 UI 다듬기 항목(6단계 참고: 재접속 처리, HP 변화 애니메이션, 모바일 실기기 테스트)
+> 9. ~~밸런스/메커닉 조정 라운드 (2026-08-28~29)~~ (구현 완료, 개발자 브라우저 재테스트 미완료)
+>    - ~~공격 코스트 누적형 개편 (매턴 리셋 → 라운드마다 +1 충전, 상한 7)~~ — 위 "코스트 시스템" 참고
+>    - ~~공격·방어·효과 카드 코스트 일괄 +2 (지형 제외)~~ — `card_design.md` 참고
+>    - ~~공격/방어 위력 랜덤화 (고정값 → 범위, 쓸 때마다 굴림) + 저코스트 카드 20장 추가~~ — 위 "카드 스탯" 참고
+>    - ~~손패 카드의 현재 코스트·위력 변동분 금색 표기 + 전투 결과 수치("-N"/"방어함") 중앙 표시~~ — 아래 "6단계 진행 상황" 참고
+>    - ~~코스트별 덱 등장 가중치 (1코스트 : 5코스트 ≈ 10 : 1)~~ — 위 "카드 스탯 > 코스트별 덱 가중치" 참고
+> 10. **다음 우선순위 상의** ← 여기부터. 유력 후보:
+>    - 위 9번 잠정 수치들(코스트 +2 후 밸런스, 위력 범위 ±1, 저코스트 카드 2~5/6~9, 덱 가중치, 라운드당 충전량 1) 실제 플레이해보고 조정
+>    - 미커밋 WIP 마무리 (재접속 처리 / 손패 드로우 개편 / 다시 시작 / 고정크기 UI — working tree에 있으나 아직 커밋·재테스트 전. 자세한 건 git diff 및 아래 "6단계 진행 상황" 참고)
 >    - 카드 비주얼을 실제 이미지로 교체(개발자가 이미지 에셋을 준비하면 진행)
->    - 문서 2장 "아직 정해지지 않은 것"/"미착수 항목"(잡화 카드, 필드 무시 카드, 시작 HP·손패 상한·덱 크기 등 수치 밸런스 — 카드 메커닉이 전부 갖춰졌으니 이제 실제 밸런싱을 시작하기 좋은 시점)
->    - 이번에 확정한 잠정 수치들(관통 피해량, damageReduction 수치, "소폭 상승" +4 등) 실제 플레이해보고 조정
+>    - 문서 2장 "아직 정해지지 않은 것"/"미착수 항목"(잡화 카드, 필드 무시 카드, 시작 HP·손패 상한 등 수치 밸런스)
+>    - 이전에 확정한 잠정 수치들(관통 피해량, damageReduction 수치, "소폭 상승" +4 등) 실제 플레이해보고 조정
 
 ### 5단계 결과 요약 (완료됨, 참고용)
 - `Room.js`에 지형(`terrain`, 1슬롯 교체형) + 효과(`effects`, 다슬롯 누적형) 상태 추가
@@ -342,6 +354,11 @@ fieldwar/
   - `#combatOverlay`(연출용 풀스크린 레이어)는 `pointer-events: none`으로 처리해서, 연출이 떠 있는 동안에도 그 아래의 손패 클릭(방어 카드 선택)이 막히지 않음 (처음엔 이 레이어가 클릭을 가로채서 방어 카드를 못 고르는 버그가 있었음)
 - 지형/효과 카드는 클릭하면 공격 카드처럼 화면 중앙에 먼저 떠서 미리보기 상태가 되고, 한 번 더 클릭하면 실제로 사용됨(바깥을 클릭하면 취소)
 - 지형 카드를 사용하면 배경 색/그라디언트가 지형 속성에 맞게 바뀜(`ELEMENT_BACKGROUNDS`/`applyTerrainBackground`) — 이미지 에셋이 없어서 색/그라디언트 테마로 대체하기로 개발자와 합의함
+
+**손패 카드의 실시간 코스트·위력 금색 표기 + 전투 결과 수치 (2026-08-29)**
+- 손패 카드 얼굴에서, 지금 이 순간 지형/필드효과/버프/상극으로 **코스트나 위력(범위)이 인쇄값과 달라져 있으면** 그 수치를 금색(`.value-modified`, `#fdcb6e`)으로 바꿔서 보여줌. 위력은 `powerLabel()`이 `getCardPowerBonus(card)`(클라 계산: 지형 상생 + 내 attackBuff/defBuff + 필드효과 damageBonus + 방어 중이면 상극 +5)만큼 이동한 범위를, 코스트는 `getCardCostInfo(card)`가 서버가 손패로 내려주는 `effectiveCost`를 그대로 써서 판정
+- 이걸 위해: `toPublicView()`의 `effects[]`에 `element`/`damageBonusAmount`/`costReductionAmount` 추가, `game:playFieldCard` 처리 끝에서 `broadcastHands(io, room)`로 **전원**에게 손패를 다시 보냄(남의 코스트를 바꾸는 지형/효과 대응), `room:updated`(playing) 수신 시 클라가 `renderHand()`도 호출해 금색 표기를 최신화
+- **전투 결과 수치**: `game:combatResult` 후, 화면 중앙의 공격/방어 카드가 사라진 뒤 이번 피해량을 `-12`처럼 큼직하게 잠깐 띄움(`#combatResultNumber`, `.combat-result-number`). 들어간 피해가 0이면 **"방어함"**으로 표시(파란색, 조금 작게). 다중 대상이면 카드가 안 사라지므로 딜레이를 짧게(350ms) 줘서 겹쳐 보여줌
 
 남은 다듬기 범위 제안 (개발자가 다음에 우선순위 정하면 됨):
 - 로딩/연결 끊김 상태 처리 (Socket.io 재연결 시 화면이 어떻게 되는지 지금은 `#connectionBanner`로 안내만 하고 깊게 신경 안 씀)

@@ -39,6 +39,10 @@
     <section id="gameOver" class="hidden">
       <h2>게임 종료</h2>
       <p id="winnerLabel"></p>
+      <!-- 재시작 기능(2026-08-27): 방장에게만 보임. 누르면 같은 방(같은 플레이어들)이 대기실로
+           돌아가고, 방장이 "게임 시작"을 다시 누르면 새 게임이 시작됨 -->
+      <button id="playAgainBtn" class="hidden">다시 시작</button>
+      <p id="playAgainHint" class="hidden">방장이 다시 시작하기를 누르면 새 게임이 시작됩니다.</p>
     </section>
   </div>
 
@@ -108,6 +112,38 @@
   <div id="combatOverlay" class="cast-overlay hidden">
     <div id="combatStack" class="cast-stack"></div>
   </div>
+
+  <!--
+    전투 결과 수치 (2026-08-29). 공격/방어 카드가 사라진 뒤 화면 중앙에 이번 공격으로 들어간
+    피해("-12")를, 피해가 없으면 "방어함"을 큼직하게 잠깐 띄웁니다. .show 클래스가 붙어 있는
+    동안만 보이며 pointer-events는 없습니다(아래 손패 클릭을 막지 않도록).
+  -->
+  <div id="combatResultNumber" class="combat-result-number"></div>
+
+  <!--
+    손패 교체 (2026-08-27 추가). 손패가 가득 찬(9장) 상태에서 턴이 끝나 카드를 뽑으면,
+    새 카드를 왼쪽에 띄우고 아래 손패에서 바꿀 카드를 직접 클릭하면 오른쪽에 미리보기로 뜹니다.
+    이 오버레이 자체는 보여주기 전용(pointer-events:none)이라, 아래 손패 클릭을 가로채지 않습니다 -
+    실제 선택/버튼은 손패와 아래 3개 버튼으로 합니다.
+  -->
+  <div id="handSwapOverlay" class="cast-overlay hidden">
+    <div class="hand-swap-panel">
+      <div class="hand-swap-slot">
+        <div class="hand-swap-slot-label">새로 뽑은 카드</div>
+        <div id="handSwapNewCard"></div>
+      </div>
+      <div class="hand-swap-arrow">→</div>
+      <div class="hand-swap-slot">
+        <div class="hand-swap-slot-label">바꿀 카드</div>
+        <div id="handSwapReplaceCard" class="hand-swap-placeholder">아래 손패에서<br />바꿀 카드를 클릭하세요</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 손패가 가득 찼을 때만(pendingHandSwap) 보임. 선택 취소/교체하기는 카드를 하나 고른 뒤에만 보임 -->
+  <button id="handSwapDeclineBtn" class="corner-action-btn hand-swap-decline-btn hidden">변경하지 않음</button>
+  <button id="handSwapClearBtn" class="corner-action-btn hand-swap-clear-btn hidden">선택 취소</button>
+  <button id="handSwapConfirmBtn" class="corner-action-btn hand-swap-confirm-btn hidden">교체하기</button>
 
   <!-- Socket.io 클라이언트 스크립트: 서버가 자동으로 이 경로에 파일을 만들어줍니다 -->
   <script src="/socket.io/socket.io.js"></script>
